@@ -40,7 +40,6 @@ ARM_INC_DIRS := carbon/include        \
                 $(ASF_INC)
 
 ARM_SRC_DIRS := carbon/atsam4s        \
-                kernel/src            \
                 kernel/arch/armv7     \
                 runtime/arch/armv7    \
 <<<<<<< HEAD
@@ -97,7 +96,6 @@ AVR_INC_DIRS := carbon/include        \
                 runtime/include
 
 AVR_SRC_DIRS := carbon/atmegau2       \
-                kernel/src            \
                 runtime/arch/avr8     \
                 runtime/src
 
@@ -152,6 +150,7 @@ carbon.c: $(ARM_TARGET).elf
 	$(_v)python utils/fdwarf/fdwarf.py $(BUILD)/$(ARM_TARGET)/$(ARM_TARGET).elf c carbon.c
 
 X86_CFLAGS   := -std=gnu99              \
+                -g                      \
                 -Wall                   \
                 -Wextra                 \
                 -Wno-unused-parameter   \

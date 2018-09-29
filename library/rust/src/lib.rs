@@ -20,7 +20,7 @@ use libc::{c_void, c_char};
 use std::ffi::CString;
 use std::ptr;
 
-type _lf_device = *const c_void;
+type _lf_device = c_void;
 type _lf_function_index = u8;
 type _fmr_return = u32;
 
@@ -36,16 +36,16 @@ type Result<T> = std::result::Result<T, FlipperError>;
 
 #[link(name = "flipper")]
 extern {
-    fn carbon_attach() -> _lf_device;
-    fn carbon_attach_hostname(hostname: *const c_char) -> _lf_device;
-    fn carbon_select_u2(device: _lf_device);
+    fn carbon_attach() -> *const _lf_device;
+    fn carbon_attach_hostname(hostname: *const c_char) -> *const _lf_device;
+    fn carbon_select_u2(device: *const _lf_device);
 }
 
 pub struct Flipper {
     /// A reference to an active Flipper profile in libflipper. This
     /// is used when communicating with libflipper to specify which
     /// device functions should be executed on.
-    device: _lf_device
+    device: *const _lf_device
 }
 
 impl Flipper {

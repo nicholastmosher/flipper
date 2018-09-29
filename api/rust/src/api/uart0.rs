@@ -46,8 +46,13 @@ impl<'a> Uart0<'a> {
 
 impl<'a> Write for Uart0<'a> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        let args = lf::Args::new();
-        lf::push::<()>(self.flipper, "uart0", 2, buf, args);
+        let device_buffer = lf::malloc(self.flipper, buf.len() as u32);
+        lf::push(self.flipper, &device_buffer, buf);
+        let args = lf::Args::new()
+            .append(device_buffer)
+            .append(buf.len() as u32);
+        lf::invoke::<()>(self.flipper, "uart0", 2, args);
+        lf::free(self.flipper, device_buffer);
         Ok(buf.len())
     }
     fn flush(&mut self) -> Result<()> {
@@ -58,8 +63,13 @@ impl<'a> Write for Uart0<'a> {
 impl<'a> Read for Uart0<'a> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() == 0 { return Ok(0) }
-        let args = lf::Args::new();
-        lf::pull::<()>(self.flipper, "uart0", 3, buf, args);
+        let device_buffer = lf::malloc(self.flipper, buf.len() as u32);
+        let args = lf::Args::new()
+            .append(device_buffer)
+            .append(buf.len() as u32);
+        lf::invoke::<()>(self.flipper, "uart0", 3, args);
+        lf::pull(self.flipper, buf, &device_buffer);
+        lf::free(self.flipper, device_buffer);
         Ok(buf.len())
     }
 }

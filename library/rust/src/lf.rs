@@ -28,13 +28,18 @@ type _lf_value = libc::uint64_t;
 /// Function indices are represented by a u8.
 type _lf_index = libc::uint8_t;
 
+/// The address type for a pointer on Flipper.
+type _lf_4s_address = libc::uint32_t;
+
+#[derive(Copy, Clone)]
+pub struct LfAddress(_lf_4s_address);
+
 // The concrete encodings for types in libflipper.
 const LF_TYPE_U8: _lf_type = 0;
 const LF_TYPE_U16: _lf_type = 1;
 const LF_TYPE_VOID: _lf_type = 2;
 const LF_TYPE_U32: _lf_type = 3;
-const _LF_TYPE_PTR: _lf_type = 4;
-const _LF_TYPE_INT: _lf_type = 6;
+const LF_TYPE_PTR: _lf_type = 6;
 const LF_TYPE_U64: _lf_type = 7;
 
 /// The internal `libflipper` representation of a function argument.
@@ -59,11 +64,13 @@ mod libflipper {
     use super::*;
     #[link(name = "flipper")]
     extern {
-        pub(crate) fn lf_get_selected() -> _lf_device;
+        pub(crate) fn lf_get_selected() -> *const _lf_device;
         pub(crate) fn lf_ll_append(ll: *mut *mut _lf_ll, item: *const c_void, destructor: *const c_void) -> c_int;
-        pub(crate) fn lf_invoke(device: _lf_device, module: *const c_char, function: _lf_index, ret_type: u8, ret_val: *const _lf_value, args: *const _lf_ll) -> i32;
-        pub(crate) fn lf_push(device: _lf_device, module: *const c_char, function: _lf_index, source: *const c_void, length: u32, args: *const _lf_ll) -> _lf_value;
-        pub(crate) fn lf_pull(device: _lf_device, module: *const c_char, function: _lf_index, dest: *mut c_void, length: u32, args: *const _lf_ll) -> _lf_value;
+        pub(crate) fn lf_invoke(device: *const _lf_device, module: *const c_char, function: _lf_index, ret_type: u8, ret_val: *const _lf_value, args: *const _lf_ll) -> i32;
+        pub(crate) fn lf_push(device: *const _lf_device, destination: _lf_4s_address, source: *const c_void, length: u32) -> i32;
+        pub(crate) fn lf_pull(device: *const _lf_device, destination: *const c_void, source: _lf_4s_address, length: u32) -> i32;
+        pub(crate) fn lf_malloc(device: *const _lf_device, size: u32, ptr: *mut _lf_4s_address) -> i32;
+        pub(crate) fn lf_free(device: *const _lf_device, ptr: _lf_4s_address) -> i32;
     }
 }
 
@@ -114,6 +121,15 @@ impl From<u64> for Arg {
         Arg(_lf_arg {
             arg_type: LF_TYPE_U64,
             arg_value: value as _lf_value,
+        })
+    }
+}
+
+impl From<LfAddress> for Arg {
+    fn from(address: LfAddress) -> Self {
+        Arg(_lf_arg {
+            arg_type: LF_TYPE_PTR,
+            arg_value: address.0 as _lf_value,
         })
     }
 }
@@ -213,7 +229,17 @@ impl From<LfReturn> for u64 {
     fn from(ret: LfReturn) -> Self { ret.0 as u64 }
 }
 
-pub fn current_device() -> _lf_device {
+impl LfReturnable for LfAddress {
+    fn lf_type() -> _lf_type { LF_TYPE_PTR }
+}
+
+impl From<LfReturn> for LfAddress {
+    fn from(ret: LfReturn) -> Self {
+        LfAddress(ret.0 as _lf_4s_address)
+    }
+}
+
+pub fn current_device() -> *const _lf_device {
     unsafe {
         libflipper::lf_get_selected()
     }
@@ -256,39 +282,45 @@ pub fn invoke<T: LfReturnable>(flipper: &Flipper, module: &str, index: u8, args:
     }
 }
 
-/// Invokes a remote function call to a Flipper device, passing a buffer of
-/// data with it.
+/// Pushes a buffer of data to an address on the given Flipper device.
 ///
-/// This is currently only used for certain Standard Modules such as uart0
-/// for sending and receiving data over a bus. However, it may be expanded
-/// in the future to support user module functions as well.
-pub fn push<T: LfReturnable>(flipper: &Flipper, module: &str, index: u8, data: &[u8], args: Args) -> T {
+/// This function will push all of the data in the `data` buffer. If less
+/// data should be pushed, simply pass a subslice of the buffer where the
+/// data is coming from.
+pub fn push(flipper: &Flipper, destination: &LfAddress, data: &[u8]) {
     unsafe {
-        let mut arglist: *mut _lf_ll = ptr::null_mut();
-        for arg in args.iter() {
-            libflipper::lf_ll_append(&mut arglist, &arg.0 as *const _lf_arg as *const c_void, ptr::null());
-        }
-        let module_name = CString::new(module).unwrap();
-        let ret = libflipper::lf_push(flipper.device, module_name.as_ptr(), index, data.as_ptr() as *const c_void, data.len() as u32, arglist);
-        T::from(LfReturn(ret))
+        libflipper::lf_push(libflipper::lf_get_selected(), destination.0, data.as_ptr() as *const c_void, data.len() as u32);
     }
 }
 
-/// Invokes a remote function call to a Flipper device, pulling a buffer of
-/// data back upon return.
+/// Pulls data from a source address on the given Flipper device.
 ///
-/// This is currently only used for certain Standard Modules such as uart0
-/// for sending and receiving data over a bus. However, it may be expanded
-/// in the future to support user module functions as well.
-pub fn pull<T: LfReturnable>(flipper: &Flipper, module: &str, index: u8, buffer: &mut [u8], args: Args) -> T {
+/// This function will continue polling for data until enough bytes
+/// are received to fill the entire destination buffer. Use the slice
+/// operation to make the destination slice the exact size of the data
+/// needed.
+pub fn pull(flipper: &Flipper, destination: &mut [u8], src: &LfAddress) {
     unsafe {
-        let mut arglist: *mut _lf_ll = ptr::null_mut();
-        for arg in args.iter() {
-            libflipper::lf_ll_append(&mut arglist, &arg.0 as *const _lf_arg as *const c_void, ptr::null());
-        }
-        let module_name = CString::new(module).unwrap();
-        let ret = libflipper::lf_pull(flipper.device, module_name.as_ptr(), index, buffer.as_mut_ptr() as *mut c_void, buffer.len() as u32, arglist);
-        T::from(LfReturn(ret))
+        libflipper::lf_pull(libflipper::lf_get_selected(), destination.as_mut_ptr() as *mut c_void, src.0, destination.len() as u32);
+    }
+}
+
+/// Allocates the given number of bytes on the given Flipper device.
+///
+/// The returned value is a pointer in the Flipper device address space, and should not
+/// be used as a native pointer on the host machine. The Flipper address is intended to
+/// be used with other low-level Flipper functions (e.g. `lf::push` and `lf::pull`).
+pub fn malloc(flipper: &Flipper, size: u32) -> LfAddress {
+    unsafe {
+        let mut address: _lf_4s_address = mem::uninitialized();
+        libflipper::lf_malloc(libflipper::lf_get_selected(), size, &mut address);
+        LfAddress(address)
+    }
+}
+
+pub fn free(flipper: &Flipper, memory: LfAddress) {
+    unsafe {
+        libflipper::lf_free(libflipper::lf_get_selected(), memory.0 as _lf_4s_address);
     }
 }
 

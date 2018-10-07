@@ -11,10 +11,14 @@ extern crate log;
 #[macro_use]
 extern crate failure;
 extern crate libc;
+extern crate libusb;
 
 #[macro_use]
 pub mod macros;
 pub mod lf;
+pub mod fmr;
+pub mod device;
+pub mod carbon;
 
 use libc::{c_void, c_char};
 use std::ffi::CString;

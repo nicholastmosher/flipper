@@ -3,6 +3,7 @@ name = "flipper_core"
 version = "0.1.0"
 authors = [ "George Morgan <george@george-morgan.com>",
             "Nick Mosher <nicholastmosher@gmail.com>" ]
+edition = "2018"
 
 [lib]
 name = "flipper_core"
@@ -12,3 +13,4 @@ path = "src/lib.rs"
 libc = "0.2.0"
 log = "0.4.1"
 failure = "0.1.1"
+libusb = "0.3.0"

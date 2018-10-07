@@ -14,10 +14,11 @@ use std::ops::Deref;
 use std::ptr;
 use std::ffi::CString;
 
-use ::{
-    Flipper,
-    _lf_device,
-};
+use crate::_lf_device;
+
+use crate::fmr::LfDevice;
+use crate::fmr::lf_arg;
+use crate::fmr::lf_type;
 
 /// Types transmitted over FMR are encoded in a u8.
 type _lf_type = libc::uint8_t;
@@ -45,6 +46,7 @@ const LF_TYPE_U64: _lf_type = 7;
 /// The internal `libflipper` representation of a function argument.
 /// This is used for FFI when we ask libflipper to execute a function
 /// on a device.
+#[derive(Debug, Eq, PartialEq)]
 #[repr(C, packed)]
 struct _lf_arg {
     arg_type: _lf_type,
@@ -87,49 +89,49 @@ mod libflipper {
 /// let three = Arg::from(30 as u32);
 /// let four =  Arg::from(40 as u64);
 /// ```
-pub struct Arg(_lf_arg);
+pub struct Arg(pub(crate) lf_arg);
 
 impl From<u8> for Arg {
     fn from(value: u8) -> Arg {
-        Arg(_lf_arg {
-            arg_type: LF_TYPE_U8,
-            arg_value: value as _lf_value,
+        Arg(lf_arg {
+            kind: lf_type::uint8,
+            value: value as _lf_value,
         })
     }
 }
 
 impl From<u16> for Arg {
     fn from(value: u16) -> Arg {
-        Arg(_lf_arg {
-            arg_type: LF_TYPE_U16,
-            arg_value: value as _lf_value,
+        Arg(lf_arg {
+            kind: lf_type::uint16,
+            value: value as _lf_value,
         })
     }
 }
 
 impl From<u32> for Arg {
     fn from(value: u32) -> Arg {
-        Arg(_lf_arg {
-            arg_type: LF_TYPE_U32,
-            arg_value: value as _lf_value,
+        Arg(lf_arg {
+            kind: lf_type::uint32,
+            value: value as _lf_value,
         })
     }
 }
 
 impl From<u64> for Arg {
     fn from(value: u64) -> Arg {
-        Arg(_lf_arg {
-            arg_type: LF_TYPE_U64,
-            arg_value: value as _lf_value,
+        Arg(lf_arg {
+            kind: lf_type::uint64,
+            value: value as _lf_value,
         })
     }
 }
 
 impl From<LfAddress> for Arg {
     fn from(address: LfAddress) -> Self {
-        Arg(_lf_arg {
-            arg_type: LF_TYPE_PTR,
-            arg_value: address.0 as _lf_value,
+        Arg(lf_arg {
+            kind: lf_type::ptr,
+            value: address.0 as _lf_value,
         })
     }
 }
@@ -269,16 +271,16 @@ pub fn current_device() -> *const _lf_device {
 /// let flipper = Flipper::attach().expect("should attach to Flipper");
 /// let output: u8 = lf::invoke(&flipper, "my_module_name", 0, args);
 /// ```
-pub fn invoke<T: LfReturnable>(flipper: &Flipper, module: &str, index: u8, args: Args) -> T {
+pub fn invoke<R: LfReturnable, T: LfDevice>(device: &mut T, module: &str, index: u8, args: Args) -> R {
     unsafe {
         let mut arglist: *mut _lf_ll = ptr::null_mut();
         for arg in args.iter() {
-            libflipper::lf_ll_append(&mut arglist, &arg.0 as *const _lf_arg as *const c_void, ptr::null());
+            libflipper::lf_ll_append(&mut arglist, &arg.0 as *const lf_arg as *const c_void, ptr::null());
         }
         let module_name = CString::new(module).unwrap();
         let mut ret: _lf_value = mem::uninitialized();
-        libflipper::lf_invoke(libflipper::lf_get_selected(), module_name.as_ptr(), index, T::lf_type(), &mut ret as *mut _lf_value, arglist);
-        T::from(LfReturn(ret))
+        libflipper::lf_invoke(libflipper::lf_get_selected(), module_name.as_ptr(), index, R::lf_type(), &mut ret as *mut _lf_value, arglist);
+        R::from(LfReturn(ret))
     }
 }
 
@@ -287,7 +289,7 @@ pub fn invoke<T: LfReturnable>(flipper: &Flipper, module: &str, index: u8, args:
 /// This function will push all of the data in the `data` buffer. If less
 /// data should be pushed, simply pass a subslice of the buffer where the
 /// data is coming from.
-pub fn push(flipper: &Flipper, destination: &LfAddress, data: &[u8]) {
+pub fn push<T: LfDevice>(device: &mut T, destination: &LfAddress, data: &[u8]) {
     unsafe {
         libflipper::lf_push(libflipper::lf_get_selected(), destination.0, data.as_ptr() as *const c_void, data.len() as u32);
     }
@@ -299,7 +301,7 @@ pub fn push(flipper: &Flipper, destination: &LfAddress, data: &[u8]) {
 /// are received to fill the entire destination buffer. Use the slice
 /// operation to make the destination slice the exact size of the data
 /// needed.
-pub fn pull(flipper: &Flipper, destination: &mut [u8], src: &LfAddress) {
+pub fn pull<T: LfDevice>(device: &mut T, destination: &mut [u8], src: &LfAddress) {
     unsafe {
         libflipper::lf_pull(libflipper::lf_get_selected(), destination.as_mut_ptr() as *mut c_void, src.0, destination.len() as u32);
     }
@@ -310,7 +312,7 @@ pub fn pull(flipper: &Flipper, destination: &mut [u8], src: &LfAddress) {
 /// The returned value is a pointer in the Flipper device address space, and should not
 /// be used as a native pointer on the host machine. The Flipper address is intended to
 /// be used with other low-level Flipper functions (e.g. `lf::push` and `lf::pull`).
-pub fn malloc(flipper: &Flipper, size: u32) -> LfAddress {
+pub fn malloc<T: LfDevice>(device: &mut T, size: u32) -> LfAddress {
     unsafe {
         let mut address: _lf_4s_address = mem::uninitialized();
         libflipper::lf_malloc(libflipper::lf_get_selected(), size, &mut address);
@@ -318,7 +320,7 @@ pub fn malloc(flipper: &Flipper, size: u32) -> LfAddress {
     }
 }
 
-pub fn free(flipper: &Flipper, memory: LfAddress) {
+pub fn free<T: LfDevice>(device: &mut T, memory: LfAddress) {
     unsafe {
         libflipper::lf_free(libflipper::lf_get_selected(), memory.0 as _lf_4s_address);
     }

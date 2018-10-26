@@ -12,27 +12,25 @@ use crate::lf::Args;
 
 const FMR_PACKET_SIZE: usize = 64;
 const FMR_MAGIC_NUMBER: u8 = 0xFE;
-const FMR_PAYLOAD_SIZE: usize = FMR_PACKET_SIZE - size_of::<fmr_header>();
+const FMR_PAYLOAD_SIZE: usize = FMR_PACKET_SIZE - size_of::<FmrHeader>();
 
 #[derive(Copy, Clone)]
-struct fmr_payload([u8; FMR_PAYLOAD_SIZE]);
+#[repr(C, packed)]
+pub struct FmrPayload([u8; FMR_PAYLOAD_SIZE]);
+const FMR_PAYLOAD_EMPTY: FmrPayload = FmrPayload([0; FMR_PAYLOAD_SIZE]);
 
-impl fmr_payload {
-    pub fn empty() -> fmr_payload { fmr_payload([0; FMR_PAYLOAD_SIZE]) }
-}
-
-type lf_crc_t = u16;
-type lf_types = u32;
-type lf_return = u64;
-type lf_argc = u8;
-type lf_arg_repr = u64;
-type lf_module = u32;
-type lf_function = u8;
+pub type LfCrc = u16;
+pub type LfTypes = u32;
+pub type LfValue = u64;
+pub type LfArgc = u8;
+pub type LfArgRepr = u64;
+pub type LfModule = u32;
+pub type LfFunction = u8;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
-enum fmr_class {
-    rpc = 0,
+pub enum FmrClass {
+    call = 0,
     push = 1,
     pull = 2,
     dyld = 3,
@@ -42,86 +40,118 @@ enum fmr_class {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-pub struct fmr_header {
-    magic: u8,
-    crc: lf_crc_t,
-    len: u16,
-    kind: fmr_class,
+pub struct FmrHeader {
+    pub magic: u8,
+    pub crc: LfCrc,
+    pub len: u16,
+    pub kind: FmrClass,
 }
 
-union fmr_packet {
-    base: fmr_packet_base,
-    call: fmr_packet_call,
-    data: fmr_packet_push_pull,
-    dyld: fmr_packet_dyld,
-    memory: fmr_packet_memory,
+pub union FmrPacket {
+    base: FmrPacketBase,
+    call: FmrPacketCall,
+    data: FmrPacketPushPull,
+    dyld: FmrPacketDyld,
+    memory: FmrPacketMemory,
 }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-struct fmr_packet_base {
-    header: fmr_header,
-    payload: fmr_payload,
-}
+impl FmrPacket {
+    pub fn new(class: FmrClass) -> FmrPacket {
+        FmrPacket {
+            base: FmrPacketBase {
+                header: FmrHeader {
+                    magic: FMR_MAGIC_NUMBER,
+                    crc: 0,
+                    len: size_of::<FmrHeader>() as u16,
+                    kind: class,
+                },
+                payload: FMR_PAYLOAD_EMPTY,
+            }
+        }
+    }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct fmr_call {
-    module: u8,
-    function: u8,
-    ret: lf_type,
-    argt: lf_types,
-    argc: lf_argc,
-    argv: (),
-}
+    pub unsafe fn into_call(mut self) -> FmrPacketCall {
+        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketCall) }
+    }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-struct fmr_packet_call {
-    header: fmr_header,
-    call: fmr_call,
-}
+    pub unsafe fn into_push_pull(mut self) -> FmrPacketPushPull {
+        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketPushPull) }
+    }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-struct fmr_packet_push_pull {
-    header: fmr_header,
-    len: u32,
-    ptr: u64,
-}
+    pub unsafe fn into_dyld(mut self) -> FmrPacketDyld {
+        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketDyld) }
+    }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-struct fmr_packet_dyld {
-    header: fmr_header,
-    module: *mut c_char,
+    pub unsafe fn into_memory(mut self) -> FmrPacketMemory {
+        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketMemory) }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-struct fmr_packet_memory {
-    header: fmr_header,
-    size: u32,
-    ptr: u64,
+pub struct FmrPacketBase {
+    pub header: FmrHeader,
+    pub payload: FmrPayload,
 }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-struct fmr_result {
-    value: lf_return,
-    error: u8,
+pub struct FmrCall {
+    pub module: u8,
+    pub function: u8,
+    pub ret: LfType,
+    pub argt: LfTypes,
+    pub argc: LfArgc,
+    pub argv: (),
 }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-pub struct lf_arg {
-    pub(crate) kind: lf_type,
-    pub(crate) value: lf_arg_repr,
+pub struct FmrPacketCall {
+    pub header: FmrHeader,
+    pub call: FmrCall,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct FmrPacketPushPull {
+    pub header: FmrHeader,
+    pub len: u32,
+    pub ptr: u64,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct FmrPacketDyld {
+    pub header: FmrHeader,
+    pub module: *mut c_char,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct FmrPacketMemory {
+    pub header: FmrHeader,
+    pub size: u32,
+    pub ptr: u64,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct FmrReturn {
+    pub value: LfValue,
+    pub error: u8,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct LfArg {
+    pub kind: LfType,
+    pub value: LfArgRepr,
 }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
-pub enum lf_type {
+pub enum LfType {
     void = 2,
     int = 4,
     ptr = 6,
@@ -139,24 +169,24 @@ pub enum lf_type {
     int64 = 15,
 }
 
-impl lf_type {
-    const MAX: u8 = 15;
+impl LfType {
+    pub const MAX: u8 = 15;
 
-    fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         match self {
-            lf_type::int8 | lf_type::uint8 => 1,
-            lf_type::int16 | lf_type::uint16 => 2,
-            lf_type::int32 | lf_type::uint32 => 4,
-            lf_type::int64 |
-            lf_type::uint64 |
-            lf_type::ptr |
-            lf_type::void => 8,
+            LfType::int8 | LfType::uint8 => 1,
+            LfType::int16 | LfType::uint16 => 2,
+            LfType::int32 | LfType::uint32 => 4,
+            LfType::int64 |
+            LfType::uint64 |
+            LfType::ptr |
+            LfType::void => 8,
             _ => 0,
         }
     }
 }
 
-impl Debug for fmr_payload {
+impl Debug for FmrPayload {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for chunk in self.0.chunks(8) {
             for byte in chunk { write!(f, "{:02X} ", byte)?; }
@@ -215,38 +245,6 @@ pub extern "C" fn lf_crc(data: *const c_void, length: u32) -> u16 {
     crc
 }
 
-pub extern "C" fn lf_create_call(
-    module: lf_module,
-    function: lf_function,
-    ret: lf_type,
-    argv: *const lf_arg,
-    argc: lf_argc,
-    header: *mut fmr_header,
-    call: *mut fmr_call
-) -> i32 {
-    let mut offset = unsafe {
-        (*call).module = module as u8;
-        (*call).function = function;
-        (*call).ret = ret;
-        (*call).argc = argc;
-        &mut ((*call).argv) as *mut () as *mut u8
-    };
-
-    for i in 0..argc {
-        unsafe {
-            let arg = argv.offset(i as isize);
-            (*call).argt |= ((((*arg).kind as u8) & lf_type::MAX) as u32) << (i * 4);
-            let size = (*arg).kind.size();
-            let value_addr = &((*arg).value) as *const u64;
-            ptr::copy(value_addr as *const u8, offset, size);
-            offset = offset.add(size);
-            (*header).len += size as u16;
-        }
-    }
-
-    1
-}
-
 #[no_mangle]
 pub extern "C" fn lf_dyld<T: LfDevice>(
     device: *mut T,
@@ -254,22 +252,22 @@ pub extern "C" fn lf_dyld<T: LfDevice>(
     index: *mut u32,
 ) -> i32 {
 
-    let mut packet = fmr_packet {
-        base: fmr_packet_base {
-            header: fmr_header {
+    let mut packet = FmrPacket {
+        base: FmrPacketBase {
+            header: FmrHeader {
                 magic: FMR_MAGIC_NUMBER,
-                len: size_of::<fmr_header>() as u16,
+                len: size_of::<FmrHeader>() as u16,
                 crc: 0,
-                kind: fmr_class::dyld,
+                kind: FmrClass::dyld,
             },
-            payload: fmr_payload::empty()
+            payload: FMR_PAYLOAD_EMPTY,
         }
     };
 
-    let mut result: fmr_result = unsafe { mem::uninitialized() };
+    let mut result: FmrReturn = unsafe { mem::uninitialized() };
 
     unsafe {
-        let dyld_packet = &mut packet as *mut fmr_packet as *mut fmr_packet_dyld;
+        let dyld_packet = &mut packet as *mut FmrPacket as *mut FmrPacketDyld;
 
         let cmodule: &CStr = CStr::from_ptr(module);
 //        let cstr: &str = cmodule.to_str().expect("should get cstring");
@@ -280,15 +278,15 @@ pub extern "C" fn lf_dyld<T: LfDevice>(
         (*dyld_packet).header.len += len as u16;
 
         let len = (*dyld_packet).header.len;
-        let crc = lf_crc(&packet as *const fmr_packet as *const c_void, len as u32);
+        let crc = lf_crc(&packet as *const FmrPacket as *const c_void, len as u32);
         (*dyld_packet).header.crc = crc;
 
-        let packet_slice = slice::from_raw_parts(&packet as *const fmr_packet as *const u8, len as usize);
+        let packet_slice = slice::from_raw_parts(&packet as *const FmrPacket as *const u8, len as usize);
         Write::write(&mut *device, packet_slice);
 
-        let mut result_buffer = [0u8; size_of::<fmr_result>()];
+        let mut result_buffer = [0u8; size_of::<FmrReturn>()];
         Read::read(&mut *device, &mut result_buffer);
-        ptr::copy(&result_buffer as *const u8, &mut result as *mut fmr_result as *mut u8, result_buffer.len());
+        ptr::copy(&result_buffer as *const u8, &mut result as *mut FmrReturn as *mut u8, result_buffer.len());
 
         *index = result.value as u32;
     }
@@ -296,45 +294,27 @@ pub extern "C" fn lf_dyld<T: LfDevice>(
     0
 }
 
-pub trait LfDevice: Read + Write + Sized {
+pub trait LfDevice: Read + Write {
     fn modules(&mut self) -> &mut Modules;
 
     fn invoke(
         &mut self,
         module: &str,
-        function: lf_function,
-        ret: lf_type,
+        function: LfFunction,
+        ret: LfType,
         args: Args,
     ) -> i32 {
 
-        let mut packet = fmr_packet {
-            base: fmr_packet_base {
-                header: fmr_header {
-                    magic: FMR_MAGIC_NUMBER,
-                    len: size_of::<fmr_header>() as u16,
-                    crc: 0,
-                    kind: fmr_class::rpc
-                },
-                payload: fmr_payload([0; FMR_PAYLOAD_SIZE]),
-            }
-        };
-
+        let mut packet = FmrPacket::new(FmrClass::call);
         let argv: Vec<_> = args.iter().map(|arg| arg.0).collect();
-
-        let (header, call) = unsafe {
-            let header = &mut packet.call.header as *mut fmr_header;
-            let call = &mut packet.call.call as *mut fmr_call;
-            (header, call)
-        };
-
         let module = self.load(module).expect("should get module");
 
-        lf_create_call(module, function, ret, argv.as_ptr(), argv.len() as u8, header, call);
+        create_call(&mut packet, module, function, ret, &argv);
         println!("Packet header: {:?}", unsafe { packet.base.header });
         println!("Packet payload: {:?}", unsafe { packet.base.payload });
 
         let packet_slice: &[u8] = unsafe {
-            let data = &packet as *const fmr_packet as *const u8;
+            let data = &packet as *const FmrPacket as *const u8;
             let len = packet.base.header.len as usize;
             slice::from_raw_parts(data, len)
         };
@@ -351,16 +331,52 @@ pub trait LfDevice: Read + Write + Sized {
         if let Some(module) = modules.find(module) { return Some(module); }
 
         let mut index: u32 = 0;
-        let module = CString::new(module).expect("should be a valid string");
+        let mut packet = FmrPacket::new(FmrClass::dyld);
 
-        let result = lf_dyld(self as *mut _, module.as_ptr(), &mut index as *mut u32);
+        // Convert one union variant to another
+        let mut dyld_packet = unsafe { packet.into_dyld() };
 
-        if result == 0 {
-            Some(index)
-        } else {
-            None
+        None
+    }
+}
+
+pub fn create_call(
+    packet: &mut FmrPacket,
+    module: LfModule,
+    function: LfFunction,
+    return_type: LfType,
+    args: &[LfArg]
+) -> Result<(), ()> {
+    let argc = args.len() as LfArgc;
+    let mut packet = unsafe { packet.call };
+
+    // Populate call packet
+    packet.call.module = module as u8;
+    packet.call.function = function;
+    packet.call.ret = return_type;
+    packet.call.argc = argc;
+
+    // Take the offset to the base of the argument list
+    let mut offset = &mut packet.call.argv as *mut () as *mut u8;
+
+    // Copy each argument into the call packet
+    for i in 0..argc {
+        let arg: &LfArg = args.get(i as usize).ok_or(())?;
+        packet.call.argt |= (((arg.kind as u8) & LfType::MAX) as u32) << (i * 4);
+
+        // Copy the argument value into the call packet
+        let arg_size = arg.kind.size();
+        unsafe {
+            let arg_value_address = &arg.value as *const u64;
+            ptr::copy(arg_value_address as *const u8, offset, arg_size);
+
+            // Increase the offset and size of the packet by the size of this argument
+            offset = offset.add(arg_size);
+            packet.header.len += arg_size as u16;
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -370,32 +386,14 @@ mod tests {
     #[test]
     fn test_create_call() {
         let args = vec![
-            lf_arg { kind: lf_type::uint8, value: 10 },
-            lf_arg { kind: lf_type::uint16, value: 1000 },
-            lf_arg { kind: lf_type::uint32, value: 2000 },
-            lf_arg { kind: lf_type::uint64, value: 4000 },
+            LfArg { kind: LfType::uint8, value: 10 },
+            LfArg { kind: LfType::uint16, value: 1000 },
+            LfArg { kind: LfType::uint32, value: 2000 },
+            LfArg { kind: LfType::uint64, value: 4000 },
         ];
 
-        let mut packet = fmr_packet {
-            base: fmr_packet_base {
-                header: fmr_header {
-                    magic: FMR_MAGIC_NUMBER,
-                    crc: 0,
-                    len: 0,
-                    kind: fmr_class::rpc,
-                },
-                payload: fmr_payload([0; FMR_PAYLOAD_SIZE]),
-            }
-        };
-
-        let mut fmr_packet_call = &mut packet as *mut fmr_packet as *mut fmr_packet_call;
-        let (header, call) = unsafe {
-            let header = &mut (*fmr_packet_call).header as *mut fmr_header;
-            let call = &mut (*fmr_packet_call).call as *mut fmr_call;
-            (header, call)
-        };
-
-        lf_create_call(3, 5, lf_type::void, args.as_ptr(), args.len() as u8, header, call);
+        let mut packet = FmrPacket::new(FmrClass::call);
+        create_call(&mut packet, 3, 5, LfType::void, &args);
 
         let payload = unsafe { packet.base.payload };
         for chunk in payload.chunks(8) {

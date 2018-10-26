@@ -17,8 +17,8 @@ use std::ffi::CString;
 use crate::_lf_device;
 
 use crate::fmr::LfDevice;
-use crate::fmr::lf_arg;
-use crate::fmr::lf_type;
+use crate::fmr::LfArg;
+use crate::fmr::LfType;
 
 /// Types transmitted over FMR are encoded in a u8.
 type _lf_type = libc::uint8_t;
@@ -89,12 +89,12 @@ mod libflipper {
 /// let three = Arg::from(30 as u32);
 /// let four =  Arg::from(40 as u64);
 /// ```
-pub struct Arg(pub(crate) lf_arg);
+pub struct Arg(pub(crate) LfArg);
 
 impl From<u8> for Arg {
     fn from(value: u8) -> Arg {
-        Arg(lf_arg {
-            kind: lf_type::uint8,
+        Arg(LfArg {
+            kind: LfType::uint8,
             value: value as _lf_value,
         })
     }
@@ -102,8 +102,8 @@ impl From<u8> for Arg {
 
 impl From<u16> for Arg {
     fn from(value: u16) -> Arg {
-        Arg(lf_arg {
-            kind: lf_type::uint16,
+        Arg(LfArg {
+            kind: LfType::uint16,
             value: value as _lf_value,
         })
     }
@@ -111,8 +111,8 @@ impl From<u16> for Arg {
 
 impl From<u32> for Arg {
     fn from(value: u32) -> Arg {
-        Arg(lf_arg {
-            kind: lf_type::uint32,
+        Arg(LfArg {
+            kind: LfType::uint32,
             value: value as _lf_value,
         })
     }
@@ -120,8 +120,8 @@ impl From<u32> for Arg {
 
 impl From<u64> for Arg {
     fn from(value: u64) -> Arg {
-        Arg(lf_arg {
-            kind: lf_type::uint64,
+        Arg(LfArg {
+            kind: LfType::uint64,
             value: value as _lf_value,
         })
     }
@@ -129,8 +129,8 @@ impl From<u64> for Arg {
 
 impl From<LfAddress> for Arg {
     fn from(address: LfAddress) -> Self {
-        Arg(lf_arg {
-            kind: lf_type::ptr,
+        Arg(LfArg {
+            kind: LfType::ptr,
             value: address.0 as _lf_value,
         })
     }
@@ -275,7 +275,7 @@ pub fn invoke<R: LfReturnable, T: LfDevice>(device: &mut T, module: &str, index:
     unsafe {
         let mut arglist: *mut _lf_ll = ptr::null_mut();
         for arg in args.iter() {
-            libflipper::lf_ll_append(&mut arglist, &arg.0 as *const lf_arg as *const c_void, ptr::null());
+            libflipper::lf_ll_append(&mut arglist, &arg.0 as *const LfArg as *const c_void, ptr::null());
         }
         let module_name = CString::new(module).unwrap();
         let mut ret: _lf_value = mem::uninitialized();

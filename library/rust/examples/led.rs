@@ -2,7 +2,7 @@ use libusb::Context;
 use flipper_core::{
     lf::Args,
     fmr::LfDevice,
-    fmr::lf_type,
+    fmr::LfType,
     carbon::Carbon,
 };
 
@@ -22,7 +22,7 @@ impl<'a, T: LfDevice> Led<'a, T> {
             .append(blue);
         let module: &str = "len";
         println!("{}", module.len());
-        self.device.invoke(module, 0, lf_type::void, args);
+        self.device.invoke(module, 0, LfType::void, args);
     }
 }
 

@@ -15,8 +15,9 @@ extern crate libusb;
 
 #[macro_use]
 pub mod macros;
+pub mod capi;
 pub mod lf;
-pub mod fmr;
+mod fmr;
 pub mod device;
 pub mod carbon;
 

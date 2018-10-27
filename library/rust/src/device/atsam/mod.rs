@@ -1,5 +1,5 @@
 use std::io::{self as io, Read, Write};
-use crate::fmr::{
+use crate::runtime::{
     LfDevice,
     Modules,
 };

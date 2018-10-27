@@ -1,6 +1,6 @@
 use std::io::{self as io, Read, Write};
 use std::time::Duration;
-use crate::fmr::{
+use crate::runtime::{
     LfDevice,
     Modules,
 };

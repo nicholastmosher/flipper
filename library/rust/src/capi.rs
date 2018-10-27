@@ -1,10 +1,12 @@
-use crate::fmr::*;
-use crate::carbon::{Carbon, Carbons};
-use crate::device::{UsbDevice, AtsamDevice};
 use std::ptr;
 use std::slice;
 use std::ffi::CStr;
 use std::os::raw::{c_void, c_char};
+
+use crate::runtime::{LfDevice, create_call};
+use crate::runtime::protocol::*;
+use crate::carbon::{Carbon, Carbons};
+use crate::device::{UsbDevice, AtsamDevice};
 
 pub type LfResult = u32;
 

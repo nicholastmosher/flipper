@@ -17,22 +17,18 @@ extern crate libusb;
 pub mod macros;
 pub mod capi;
 pub mod lf;
-mod fmr;
+pub mod runtime;
 pub mod device;
 pub mod carbon;
 
-pub use self::fmr::LfDevice;
-pub use self::fmr::LfType;
+pub use self::runtime::LfDevice;
+pub use self::runtime::protocol::LfType;
 
 use libc::{c_void, c_char};
 use std::ffi::CString;
 use std::ptr;
 
 type _lf_device = c_void;
-type _lf_function_index = u8;
-type _fmr_return = u32;
-
-pub const LF_VERSION: u16 = 0x0001;
 
 #[derive(Debug, Fail)]
 pub enum FlipperError {

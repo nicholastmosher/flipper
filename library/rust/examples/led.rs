@@ -1,7 +1,7 @@
 use flipper_core::{
     LfDevice,
     LfType,
-    lf::Args,
+    runtime::Args,
     carbon::Carbon,
 };
 
@@ -28,5 +28,5 @@ fn main() {
     let carbon = carbons.iter_mut().next().expect("should get a Flipper on usb");
 
     let mut led = Led::new(carbon.atmegau2());
-    led.rgb(10, 20, 10);
+    led.rgb(10, 00, 10);
 }

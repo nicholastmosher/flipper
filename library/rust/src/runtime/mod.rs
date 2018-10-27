@@ -1,233 +1,16 @@
+pub mod protocol;
+use self::protocol::*;
+
 use std::ptr;
 use std::slice;
+use std::ops::Deref;
 use std::mem::size_of;
 use std::ffi::CString;
 use std::io::{Read, Write};
-use std::fmt::{self as fmt, Debug};
 use std::collections::HashMap;
 use std::os::raw::c_char;
 
 use crate::capi::lf_crc;
-use crate::lf::Args;
-
-const FMR_PACKET_SIZE: usize = 64;
-const FMR_MAGIC_NUMBER: u8 = 0xFE;
-const FMR_PAYLOAD_SIZE: usize = FMR_PACKET_SIZE - size_of::<FmrHeader>();
-
-#[derive(Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPayload([u8; FMR_PAYLOAD_SIZE]);
-
-const FMR_PAYLOAD_EMPTY: FmrPayload = FmrPayload([0; FMR_PAYLOAD_SIZE]);
-
-pub type LfCrc = u16;
-pub type LfTypes = u32;
-pub type LfValue = u64;
-pub type LfArgc = u8;
-pub type LfArgRepr = u64;
-pub type LfModule = u32;
-pub type LfFunction = u8;
-
-#[derive(Debug, Copy, Clone)]
-#[repr(u8)]
-pub enum FmrClass {
-    call = 0,
-    push = 1,
-    pull = 2,
-    dyld = 3,
-    malloc = 4,
-    free = 5,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrHeader {
-    pub magic: u8,
-    pub crc: LfCrc,
-    pub len: u16,
-    pub kind: FmrClass,
-}
-
-pub union FmrPacket {
-    base: FmrPacketBase,
-    call: FmrPacketCall,
-    data: FmrPacketPushPull,
-    dyld: FmrPacketDyld,
-    memory: FmrPacketMemory,
-}
-
-impl FmrPacket {
-    pub fn new(class: FmrClass) -> FmrPacket {
-        FmrPacket {
-            base: FmrPacketBase {
-                header: FmrHeader {
-                    magic: FMR_MAGIC_NUMBER,
-                    crc: 0,
-                    // Under normal circumstances this would be mem::size_of::<FmrHeader>(),
-                    // but for some reason the packed repr in C calculates the size as 8, not 6.
-                    len: 8,
-                    kind: class,
-                },
-                payload: FMR_PAYLOAD_EMPTY,
-            }
-        }
-    }
-
-    pub unsafe fn into_call(mut self) -> FmrPacketCall {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketCall)
-    }
-
-    pub unsafe fn into_push_pull(mut self) -> FmrPacketPushPull {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketPushPull)
-    }
-
-    pub unsafe fn into_dyld(mut self) -> FmrPacketDyld {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketDyld)
-    }
-
-    pub unsafe fn into_memory(mut self) -> FmrPacketMemory {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketMemory)
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPacketBase {
-    pub header: FmrHeader,
-    pub payload: FmrPayload,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrCall {
-    pub module: u8,
-    pub function: u8,
-    pub ret: LfType,
-    pub argt: LfTypes,
-    pub argc: LfArgc,
-    pub argv: (),
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPacketCall {
-    pub header: FmrHeader,
-    pub call: FmrCall,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPacketPushPull {
-    pub header: FmrHeader,
-    pub len: u32,
-    pub ptr: u64,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPacketDyld {
-    pub header: FmrHeader,
-    pub module: *mut c_char,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPacketMemory {
-    pub header: FmrHeader,
-    pub size: u32,
-    pub ptr: u64,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrReturn {
-    pub value: LfValue,
-    pub error: u8,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct LfArg {
-    pub kind: LfType,
-    pub value: LfArgRepr,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(u8)]
-pub enum LfType {
-    void = 2,
-    int = 4,
-    ptr = 6,
-
-    // Unsigned types
-    uint8 = 0,
-    uint16 = 1,
-    uint32 = 3,
-    uint64 = 7,
-
-    // Signed types
-    int8 = 8,
-    int16 = 9,
-    int32 = 11,
-    int64 = 15,
-}
-
-impl LfType {
-    pub const MAX: u8 = 15;
-
-    pub fn size(&self) -> usize {
-        match self {
-            LfType::int8 | LfType::uint8 => 1,
-            LfType::int16 | LfType::uint16 => 2,
-            LfType::int32 | LfType::uint32 => 4,
-            LfType::int64 |
-            LfType::uint64 |
-            LfType::ptr |
-            LfType::void => 8,
-            _ => 0,
-        }
-    }
-}
-
-impl Debug for FmrPayload {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for chunk in self.0.chunks(8) {
-            for byte in chunk { write!(f, "{:02X} ", byte)?; }
-            writeln!(f);
-        }
-        Ok(())
-    }
-}
-
-pub struct Module {
-    name: String,
-    index: u32,
-    version: u16,
-}
-
-impl Module {
-    pub fn new(name: String, index: u32, version: u16) -> Module {
-        Module { name, index, version }
-    }
-}
-
-pub struct Modules(HashMap<String, Module>);
-
-impl Modules {
-    pub fn new() -> Modules { Modules(HashMap::new()) }
-
-    pub fn register(&mut self, module: Module) {
-        self.0.insert(module.name.clone(), module);
-    }
-
-    pub fn find(&self, name: &str) -> Option<u32> {
-        self.0.get(name).map(|module| module.index)
-    }
-
-    pub fn unload(&mut self, name: &str) -> bool {
-        self.0.remove(name).is_some()
-    }
-}
 
 pub trait LfDevice: Read + Write {
     fn modules(&mut self) -> &mut Modules;
@@ -315,6 +98,199 @@ pub trait LfDevice: Read + Write {
 
         if result.error != 0 { return None }
         Some(result.value as u32)
+    }
+}
+
+pub struct Module {
+    name: String,
+    index: u32,
+    version: u16,
+}
+
+impl Module {
+    pub fn new(name: String, index: u32, version: u16) -> Module {
+        Module { name, index, version }
+    }
+}
+
+pub struct Modules(HashMap<String, Module>);
+
+impl Modules {
+    pub fn new() -> Modules { Modules(HashMap::new()) }
+
+    pub fn register(&mut self, module: Module) {
+        self.0.insert(module.name.clone(), module);
+    }
+
+    pub fn find(&self, name: &str) -> Option<u32> {
+        self.0.get(name).map(|module| module.index)
+    }
+
+    pub fn unload(&mut self, name: &str) -> bool {
+        self.0.remove(name).is_some()
+    }
+}
+
+/// Represents an argument to a remote call.
+///
+/// Any type which implement `Into<Arg>` can be appended to an `Args` list.
+/// This currently includes `u8`, `u16`, `u32`, and `u64`.
+///
+/// ```
+/// use flipper::lf::Arg;
+///
+/// let one =   Arg::from(10 as u8);
+/// let two =   Arg::from(20 as u16);
+/// let three = Arg::from(30 as u32);
+/// let four =  Arg::from(40 as u64);
+/// ```
+pub struct Arg(pub(crate) LfArg);
+
+impl From<u8> for Arg {
+    fn from(value: u8) -> Arg {
+        Arg(LfArg {
+            kind: LfType::uint8,
+            value: value as LfValue,
+        })
+    }
+}
+
+impl From<u16> for Arg {
+    fn from(value: u16) -> Arg {
+        Arg(LfArg {
+            kind: LfType::uint16,
+            value: value as LfValue,
+        })
+    }
+}
+
+impl From<u32> for Arg {
+    fn from(value: u32) -> Arg {
+        Arg(LfArg {
+            kind: LfType::uint32,
+            value: value as LfValue,
+        })
+    }
+}
+
+impl From<u64> for Arg {
+    fn from(value: u64) -> Arg {
+        Arg(LfArg {
+            kind: LfType::uint64,
+            value: value as LfValue,
+        })
+    }
+}
+
+impl From<LfPointer> for Arg {
+    fn from(address: LfPointer) -> Self {
+        Arg(LfArg {
+            kind: LfType::ptr,
+            value: address.0 as LfValue,
+        })
+    }
+}
+
+/// Represents an ordered, typed set of arguments to a Flipper remote call. This is
+/// to be used for calling `invoke`.
+///
+/// ```
+/// let args = Args::new()
+///                .append(10 as u8)
+///                .append(20 as u16)
+///                .append(30 as u32)
+///                .append(40 as u64);
+/// ```
+pub struct Args(Vec<Arg>);
+
+impl Args {
+    pub fn new() -> Self {
+        Args(Vec::new())
+    }
+    pub fn append<T: Into<Arg>>(mut self, arg: T) -> Self {
+        self.0.push(arg.into());
+        self
+    }
+}
+
+impl Deref for Args {
+    type Target = Vec<Arg>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A container type for a value returned by performing an
+/// `invoke` call. Types which implement `LfReturnable`
+/// must define how to extract their own representation
+/// from this container.
+pub struct LfReturn(pub(crate) LfValue);
+
+/// A trait to be implemented for types which can be returned
+/// from an `invoke` call. Currently, only types up to
+/// 64 bits can be represented. Any type which implements
+/// `LfReturnable` must be able to extract itself from the
+/// 64 bit representation in `LfReturn`.
+///
+/// Current `LfReturnable` types are `()`, `u8,` `u16`, `u32`,
+/// and `u64`.
+pub trait LfReturnable: From<LfReturn> {
+    fn lf_type() -> LfType;
+}
+
+impl LfReturnable for () {
+    fn lf_type() -> LfType { LfType::void }
+}
+
+impl From<LfReturn> for () {
+    fn from(_: LfReturn) -> Self { () }
+}
+
+impl LfReturnable for u8 {
+    fn lf_type() -> LfType { LfType::uint8 }
+}
+
+impl From<LfReturn> for u8 {
+    fn from(ret: LfReturn) -> Self {
+        ret.0 as u8
+    }
+}
+
+impl LfReturnable for u16 {
+    fn lf_type() -> LfType { LfType::uint16 }
+}
+
+impl From<LfReturn> for u16 {
+    fn from(ret: LfReturn) -> Self {
+        ret.0 as u16
+    }
+}
+
+impl LfReturnable for u32 {
+    fn lf_type() -> LfType { LfType::uint32 }
+}
+
+impl From<LfReturn> for u32 {
+    fn from(ret: LfReturn) -> Self {
+        ret.0 as u32
+    }
+}
+
+impl LfReturnable for u64 {
+    fn lf_type() -> LfType { LfType::uint64 }
+}
+
+impl From<LfReturn> for u64 {
+    fn from(ret: LfReturn) -> Self { ret.0 as u64 }
+}
+
+impl LfReturnable for LfPointer {
+    fn lf_type() -> LfType { LfType::ptr }
+}
+
+impl From<LfReturn> for LfPointer {
+    fn from(ret: LfReturn) -> Self {
+        LfPointer(ret.0 as LfAddress)
     }
 }
 

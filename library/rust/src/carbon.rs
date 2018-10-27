@@ -43,21 +43,35 @@ impl<'a> Drop for Carbons<'a> {
 }
 
 pub struct Carbon<'a> {
-    atmegau2: UsbDevice<'a>,
+    atmegau2: Box<UsbDevice<'a>>,
+    atsam4s: Option<AtsamDevice<'a, UsbDevice<'a>>>,
 }
 
 impl<'a> Carbon<'a> {
+    fn new(atmegau2: UsbDevice<'a>) -> Carbon<'a> {
+        let mut carbon = Carbon { atmegau2: Box::new(atmegau2), atsam4s: None };
+
+        // Erase the lifetime of the UsbDevice. Since AtsamDevice requires a reference
+        // to the UsbDevice, placing them both in the same struct creates a self-referential
+        // problem. However, since neither the UsbDevice nor the AtsamDevice can be individually
+        // moved out of this struct, they will both be dropped at the same time.
+        let atmegau2 = unsafe { &mut *(carbon.atmegau2.as_mut() as *mut _) };
+        let atsam4s = AtsamDevice::new(atmegau2);
+        carbon.atsam4s = Some(atsam4s);
+        carbon
+    }
+
     pub fn attach() -> Carbons<'a> {
-        let mut context = Context::new().expect("should get libusb context");
+        let context = Context::new().expect("should get libusb context");
         let mut carbons = Carbons { context: Box::new(context), devices: Some(vec![]) };
 
         // Erase the lifetime of the context. We never allow a Carbon device to be moved
         // out of the Carbons struct so we can guarantee that they live exactly as long
         // as the libusb Context.
-        let context = unsafe { &mut *(carbons.context.as_mut() as *mut Context) };
+        let context = unsafe { &mut *(carbons.context.as_mut() as *mut _) };
 
         for atmegau2 in get_usb_devices(context) {
-            carbons.devices.as_mut().unwrap().push(Carbon { atmegau2 })
+            carbons.devices.as_mut().unwrap().push(Carbon::new(atmegau2))
         }
 
         carbons
@@ -67,7 +81,14 @@ impl<'a> Carbon<'a> {
         &mut self.atmegau2
     }
 
-    pub fn atsam4s(&'a mut self) -> AtsamDevice<'a, UsbDevice<'a>> {
-        AtsamDevice::new(&mut self.atmegau2)
+    pub fn atsam4s(&mut self) -> &mut AtsamDevice<'a, UsbDevice<'a>> {
+        self.atsam4s.as_mut().unwrap()
+    }
+}
+
+impl<'a> Drop for Carbon<'a> {
+    fn drop(&mut self) {
+        // Drop the AtsamDevice before dropping the UsbDevice
+        self.atsam4s = None
     }
 }

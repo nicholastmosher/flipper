@@ -1,13 +1,13 @@
-use std::mem::size_of;
 use std::ptr;
-use std::mem;
 use std::slice;
-use std::ffi::{CStr, CString};
+use std::mem::size_of;
+use std::ffi::CString;
 use std::io::{Read, Write};
 use std::fmt::{self as fmt, Debug};
 use std::collections::HashMap;
-use std::os::raw::{c_void, c_char};
+use std::os::raw::c_char;
 
+use crate::capi::lf_crc;
 use crate::lf::Args;
 
 const FMR_PACKET_SIZE: usize = 64;
@@ -229,73 +229,6 @@ impl Modules {
     }
 }
 
-pub extern "C" fn lf_crc(data: *const u8, length: u32) -> u16 {
-    const POLY: u16 = 0x1021;
-    let mut crc: u16 = 0;
-    for i in 0..length {
-        unsafe {
-            let word = ptr::read(data.offset(i as isize) as *const u16);
-            crc = crc ^ word << 8;
-            for _ in 0..8 {
-                if crc & 0x8000 != 0 {
-                    crc = crc << 1 ^ POLY;
-                } else {
-                    crc = crc << 1;
-                }
-            }
-        }
-    }
-    crc
-}
-
-#[no_mangle]
-pub extern "C" fn lf_dyld<T: LfDevice>(
-    device: *mut T,
-    module: *const c_char,
-    index: *mut u32,
-) -> i32 {
-    let mut packet = FmrPacket {
-        base: FmrPacketBase {
-            header: FmrHeader {
-                magic: FMR_MAGIC_NUMBER,
-                len: 8,
-                crc: 0,
-                kind: FmrClass::dyld,
-            },
-            payload: FMR_PAYLOAD_EMPTY,
-        }
-    };
-
-    let mut result: FmrReturn = unsafe { mem::uninitialized() };
-
-    unsafe {
-        let dyld_packet = &mut packet as *mut FmrPacket as *mut FmrPacketDyld;
-
-        let cmodule: &CStr = CStr::from_ptr(module);
-//        let cstr: &str = cmodule.to_str().expect("should get cstring");
-//        let len = str::len(cstr) + 1;
-        let len = 4;
-
-//        ptr::copy(module, (*dyld_packet).module as *mut i8, len);
-        (*dyld_packet).header.len += len as u16;
-
-        let len = (*dyld_packet).header.len;
-        let crc = lf_crc(&packet as *const FmrPacket as *const u8, len as u32);
-        (*dyld_packet).header.crc = crc;
-
-        let packet_slice = slice::from_raw_parts(&packet as *const FmrPacket as *const u8, len as usize);
-        Write::write(&mut *device, packet_slice);
-
-        let mut result_buffer = [0u8; size_of::<FmrReturn>()];
-        Read::read(&mut *device, &mut result_buffer);
-        ptr::copy(&result_buffer as *const u8, &mut result as *mut FmrReturn as *mut u8, result_buffer.len());
-
-        *index = result.value as u32;
-    }
-
-    0
-}
-
 pub trait LfDevice: Read + Write {
     fn modules(&mut self) -> &mut Modules;
 
@@ -306,14 +239,13 @@ pub trait LfDevice: Read + Write {
         ret: LfType,
         args: Args,
     ) -> Option<u32> {
-        let mut packet = FmrPacket::new(FmrClass::call);
+        let packet = FmrPacket::new(FmrClass::call);
         let mut call_packet = unsafe { packet.into_call() };
 
         let argv: Vec<_> = args.iter().map(|arg| arg.0).collect();
         let module = self.load(module).expect("should get module");
 
         create_call(&mut call_packet, module as u32, function, ret, &argv);
-        println!("Packet header: {:?}", unsafe { call_packet.header });
 
         // Calculate the crc for the packet
         let len = call_packet.header.len as u32;
@@ -331,7 +263,7 @@ pub trait LfDevice: Read + Write {
         let result = unsafe {
             let mut result = FmrReturn { value: 0, error: 0 };
             let result_pointer = &mut result as *mut FmrReturn as *mut u8;
-            let mut result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
+            let result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
             self.read(result_slice);
             result
         };
@@ -345,10 +277,8 @@ pub trait LfDevice: Read + Write {
         let modules = self.modules();
         if let Some(module) = modules.find(module) { return Some(module); }
 
-        let mut index: u32 = 0;
-        let mut packet = FmrPacket::new(FmrClass::dyld);
-
         // Convert one union variant to another
+        let packet = FmrPacket::new(FmrClass::dyld);
         let mut dyld_packet = unsafe { packet.into_dyld() };
 
         let module_cstring = match CString::new(module) {
@@ -358,7 +288,7 @@ pub trait LfDevice: Read + Write {
 
         // Copy the module name into the packet
         let buffer = module_cstring.as_bytes_with_nul();
-        let module = &mut (dyld_packet.module) as *mut *mut c_char as *mut u8;
+        let module = unsafe { &mut (dyld_packet.module) as *mut *mut c_char as *mut u8 };
         unsafe { ptr::copy(buffer.as_ptr(), module, buffer.len()) };
         dyld_packet.header.len += buffer.len() as u16;
 
@@ -378,7 +308,7 @@ pub trait LfDevice: Read + Write {
         let result = unsafe {
             let mut result = FmrReturn { value: 0, error: 0 };
             let result_pointer = &mut result as *mut FmrReturn as *mut u8;
-            let mut result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
+            let result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
             self.read(result_slice);
             result
         };

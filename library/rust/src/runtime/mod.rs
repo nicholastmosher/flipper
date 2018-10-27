@@ -2,9 +2,7 @@ pub mod protocol;
 use self::protocol::*;
 
 use std::ptr;
-use std::slice;
 use std::ops::Deref;
-use std::mem::size_of;
 use std::ffi::CString;
 use std::io::{Read, Write};
 use std::collections::HashMap;
@@ -22,12 +20,14 @@ pub trait LfDevice: Read + Write {
         ret: LfType,
         args: Args,
     ) -> Option<u32> {
+
+        // Create a call packet
         let packet = FmrPacket::new(FmrClass::call);
-        let mut call_packet = unsafe { packet.into_call() };
+        let mut call_packet = FmrPacketCall::from(packet);
 
-        let argv: Vec<_> = args.iter().map(|arg| arg.0).collect();
+        // Write the module index and function arguments into the packet
         let module = self.load(module).expect("should get module");
-
+        let argv: Vec<_> = args.iter().map(|arg| arg.0).collect();
         create_call(&mut call_packet, module as u32, function, ret, &argv);
 
         // Calculate the crc for the packet
@@ -36,20 +36,11 @@ pub trait LfDevice: Read + Write {
         call_packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        let packet_slice: &[u8] = unsafe {
-            let data = &call_packet as *const FmrPacketCall as *const u8;
-            slice::from_raw_parts(data, size_of::<FmrPacket>())
-        };
-        self.write(packet_slice);
+        self.write(unsafe { call_packet.as_bytes() });
 
         // Receive the result as raw bytes
-        let result = unsafe {
-            let mut result = FmrReturn { value: 0, error: 0 };
-            let result_pointer = &mut result as *mut FmrReturn as *mut u8;
-            let result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
-            self.read(result_slice);
-            result
-        };
+        let mut result = FmrReturn::new();
+        self.read(unsafe { result.as_mut_bytes() });
 
         Some(result.value as u32)
     }
@@ -60,9 +51,9 @@ pub trait LfDevice: Read + Write {
         let modules = self.modules();
         if let Some(module) = modules.find(module) { return Some(module); }
 
-        // Convert one union variant to another
+        // Create a dyld packet
         let packet = FmrPacket::new(FmrClass::dyld);
-        let mut dyld_packet = unsafe { packet.into_dyld() };
+        let mut dyld_packet = FmrPacketDyld::from(packet);
 
         let module_cstring = match CString::new(module) {
             Ok(cstr) => cstr,
@@ -81,23 +72,39 @@ pub trait LfDevice: Read + Write {
         dyld_packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        let packet_buffer: &[u8] = unsafe {
-            let data = &dyld_packet as *const FmrPacketDyld as *const u8;
-            slice::from_raw_parts(data, size_of::<FmrPacket>())
-        };
-        self.write(packet_buffer);
+        self.write(unsafe { dyld_packet.as_bytes() });
 
         // Receive the result as raw bytes
-        let result = unsafe {
-            let mut result = FmrReturn { value: 0, error: 0 };
-            let result_pointer = &mut result as *mut FmrReturn as *mut u8;
-            let result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
-            self.read(result_slice);
-            result
-        };
+        let mut result = FmrReturn::new();
+        self.read(unsafe { result.as_mut_bytes() });
 
         if result.error != 0 { return None }
         Some(result.value as u32)
+    }
+
+    fn malloc(&mut self, size: u32) -> Option<LfPointer> {
+
+        // Create a malloc packet
+        let packet = FmrPacket::new(FmrClass::malloc);
+        let mut malloc_packet = FmrPacketMalloc::from(packet);
+
+        // Write the size of the requested buffer in the packet
+        malloc_packet.size = size;
+
+        // Calculate the crc for the packet
+        let len = malloc_packet.header.len as u32;
+        let crc = lf_crc(&malloc_packet as *const FmrPacketMalloc as *const u8, len);
+        malloc_packet.header.crc = crc;
+
+        // Send the packet as raw bytes
+        self.write(unsafe { malloc_packet.as_bytes() });
+
+        // Read the result as raw bytes
+        let mut result = FmrReturn::new();
+        self.read(unsafe { result.as_mut_bytes() });
+
+        if result.error != 0 { return None }
+        Some(LfPointer(result.value as u32))
     }
 }
 

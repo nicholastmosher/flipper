@@ -1,3 +1,4 @@
+use std::slice;
 use std::mem::size_of;
 use std::os::raw::c_char;
 use std::fmt::{self as fmt, Debug};
@@ -48,7 +49,7 @@ pub union FmrPacket {
     pub call: FmrPacketCall,
     pub data: FmrPacketPushPull,
     pub dyld: FmrPacketDyld,
-    pub memory: FmrPacketMemory,
+    pub memory: FmrPacketMalloc,
 }
 
 impl FmrPacket {
@@ -67,23 +68,45 @@ impl FmrPacket {
             }
         }
     }
+}
 
-    pub unsafe fn into_call(mut self) -> FmrPacketCall {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketCall)
-    }
-
-    pub unsafe fn into_push_pull(mut self) -> FmrPacketPushPull {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketPushPull)
-    }
-
-    pub unsafe fn into_dyld(mut self) -> FmrPacketDyld {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketDyld)
-    }
-
-    pub unsafe fn into_memory(mut self) -> FmrPacketMemory {
-        *(&mut self as *mut FmrPacket as *mut FmrPacketMemory)
+pub trait FmrAsBytes: Sized {
+    unsafe fn as_bytes(&self) -> &[u8] {
+        slice::from_raw_parts(self as *const _ as *const u8, size_of::<FmrPacket>())
     }
 }
+
+impl From<FmrPacket> for FmrPacketCall {
+    fn from(mut packet: FmrPacket) -> Self {
+        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketCall) }
+    }
+}
+
+impl FmrAsBytes for FmrPacketCall { }
+
+impl From<FmrPacket> for FmrPacketPushPull {
+    fn from(mut packet: FmrPacket) -> Self {
+        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketPushPull) }
+    }
+}
+
+impl FmrAsBytes for FmrPacketPushPull { }
+
+impl From<FmrPacket> for FmrPacketDyld {
+    fn from(mut packet: FmrPacket) -> Self {
+        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketDyld) }
+    }
+}
+
+impl FmrAsBytes for FmrPacketDyld { }
+
+impl From<FmrPacket> for FmrPacketMalloc {
+    fn from(mut packet: FmrPacket) -> Self {
+        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketMalloc) }
+    }
+}
+
+impl FmrAsBytes for FmrPacketMalloc { }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
@@ -127,7 +150,7 @@ pub struct FmrPacketDyld {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-pub struct FmrPacketMemory {
+pub struct FmrPacketMalloc {
     pub header: FmrHeader,
     pub size: u32,
     pub ptr: u64,
@@ -138,6 +161,14 @@ pub struct FmrPacketMemory {
 pub struct FmrReturn {
     pub value: LfValue,
     pub error: u8,
+}
+
+impl FmrReturn {
+    pub fn new() -> FmrReturn { FmrReturn { value: 0, error: 0 } }
+
+    pub unsafe fn as_mut_bytes(&mut self) -> &mut [u8] {
+        slice::from_raw_parts_mut(self as *mut _ as *mut u8, size_of::<FmrReturn>())
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

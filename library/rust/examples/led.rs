@@ -1,4 +1,3 @@
-use libusb::Context;
 use flipper_core::{
     LfDevice,
     LfType,
@@ -20,17 +19,14 @@ impl<'a, T: LfDevice> Led<'a, T> {
             .append(red)
             .append(green)
             .append(blue);
-        let module: &str = "led";
-        println!("{}", module.len());
-        self.device.invoke(module, 0, LfType::void, args);
+        self.device.invoke("led", 0, LfType::void, args);
     }
 }
 
 fn main() {
-    let mut context = Context::new().expect("should get libusb context");
-    let mut carbons = Carbon::attach(&mut context);
-    let carbon = carbons.first_mut().expect("should get a Flipper on usb");
+    let mut carbons = Carbon::attach();
+    let carbon = carbons.iter_mut().next().expect("should get a Flipper on usb");
 
     let mut led = Led::new(carbon.atmegau2());
-    led.rgb(0, 10, 10);
+    led.rgb(10, 0, 10);
 }

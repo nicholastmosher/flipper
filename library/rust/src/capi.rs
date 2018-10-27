@@ -1,4 +1,5 @@
 use crate::fmr::*;
+use crate::carbon::{Carbon, Carbons};
 use std::ptr;
 use std::slice;
 use std::ffi::CStr;
@@ -12,6 +13,42 @@ enum LfStatus {
     NullPointer = 1,
     InvalidString = 2,
     PackageNotLoaded = 3,
+    NoDevicesFound = 4,
+    IndexOutOfBounds = 5,
+}
+
+/// Returns an opaque pointer to a set of Carbon devices and the length of the set.
+///
+/// There are no guarantees about the representation of the device set. The returned value should
+/// be used solely as a handle to provide to other libflipper functions that accept a Carbon set.
+///
+/// The pointer returned as `devices` is heap-allocated and owned by the caller. The
+/// proper way to release the device set is by using `carbon_release`.
+pub extern "C" fn carbon_attach(devices: *mut *mut Carbons, length: *mut u32) -> LfResult {
+    let carbons = Carbon::attach();
+    if carbons.len() == 0 { return LfStatus::NoDevicesFound as u32; }
+
+    let carbons = Box::new(Carbon::attach());
+    let carbons_length = carbons.len();
+    let carbons_pointer = Box::into_raw(carbons);
+
+    unsafe {
+        *devices = carbons_pointer;
+        *length = carbons_length as u32;
+    }
+
+    LfStatus::Success as u32
+}
+
+/// Releases the memory used by the Carbon device set.
+///
+/// This function takes ownership of the devices pointer, then frees the backing memory. The
+/// devices pointer should never be accessed after calling this function.
+pub extern "C" fn carbon_release(devices: *mut Carbons) -> LfResult {
+    // Re-create the Box<Carbons> from the raw pointer.
+    // When this function ends the box will be dropped.
+    let carbons = unsafe { Box::from_raw(devices) };
+    LfStatus::Success as u32
 }
 
 /// Initializes an FMR "call packet" using the given arguments.
@@ -45,10 +82,10 @@ pub extern "C" fn lf_create_call(
     return_type: LfType,
     argv: *const LfArg,
     argc: LfArgc,
-    packet: *mut FmrPacket
+    packet: *mut FmrPacket,
 ) -> LfResult {
-    if argv == ptr::null() { return 1 }
-    if packet == ptr::null_mut() { return 1 }
+    if argv == ptr::null() { return 1; }
+    if packet == ptr::null_mut() { return 1; }
 
     // Convert raw C types into safe Rust types.
     let (mut packet, args) = unsafe {

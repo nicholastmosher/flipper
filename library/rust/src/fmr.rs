@@ -17,6 +17,7 @@ const FMR_PAYLOAD_SIZE: usize = FMR_PACKET_SIZE - size_of::<FmrHeader>();
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
 pub struct FmrPayload([u8; FMR_PAYLOAD_SIZE]);
+
 const FMR_PAYLOAD_EMPTY: FmrPayload = FmrPayload([0; FMR_PAYLOAD_SIZE]);
 
 pub type LfCrc = u16;
@@ -62,7 +63,9 @@ impl FmrPacket {
                 header: FmrHeader {
                     magic: FMR_MAGIC_NUMBER,
                     crc: 0,
-                    len: size_of::<FmrHeader>() as u16,
+                    // Under normal circumstances this would be mem::size_of::<FmrHeader>(),
+                    // but for some reason the packed repr in C calculates the size as 8, not 6.
+                    len: 8,
                     kind: class,
                 },
                 payload: FMR_PAYLOAD_EMPTY,
@@ -71,19 +74,19 @@ impl FmrPacket {
     }
 
     pub unsafe fn into_call(mut self) -> FmrPacketCall {
-        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketCall) }
+        *(&mut self as *mut FmrPacket as *mut FmrPacketCall)
     }
 
     pub unsafe fn into_push_pull(mut self) -> FmrPacketPushPull {
-        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketPushPull) }
+        *(&mut self as *mut FmrPacket as *mut FmrPacketPushPull)
     }
 
     pub unsafe fn into_dyld(mut self) -> FmrPacketDyld {
-        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketDyld) }
+        *(&mut self as *mut FmrPacket as *mut FmrPacketDyld)
     }
 
     pub unsafe fn into_memory(mut self) -> FmrPacketMemory {
-        *unsafe { &mut *(&mut self as *mut FmrPacket as *mut FmrPacketMemory) }
+        *(&mut self as *mut FmrPacket as *mut FmrPacketMemory)
     }
 }
 
@@ -226,14 +229,14 @@ impl Modules {
     }
 }
 
-pub extern "C" fn lf_crc(data: *const c_void, length: u32) -> u16 {
+pub extern "C" fn lf_crc(data: *const u8, length: u32) -> u16 {
     const POLY: u16 = 0x1021;
     let mut crc: u16 = 0;
     for i in 0..length {
         unsafe {
-            let word = (data.offset(i as isize) as *const u16).read();
-            crc ^= word << 8;
-            for _ in 0..=8 {
+            let word = ptr::read(data.offset(i as isize) as *const u16);
+            crc = crc ^ word << 8;
+            for _ in 0..8 {
                 if crc & 0x8000 != 0 {
                     crc = crc << 1 ^ POLY;
                 } else {
@@ -251,12 +254,11 @@ pub extern "C" fn lf_dyld<T: LfDevice>(
     module: *const c_char,
     index: *mut u32,
 ) -> i32 {
-
     let mut packet = FmrPacket {
         base: FmrPacketBase {
             header: FmrHeader {
                 magic: FMR_MAGIC_NUMBER,
-                len: size_of::<FmrHeader>() as u16,
+                len: 8,
                 crc: 0,
                 kind: FmrClass::dyld,
             },
@@ -278,7 +280,7 @@ pub extern "C" fn lf_dyld<T: LfDevice>(
         (*dyld_packet).header.len += len as u16;
 
         let len = (*dyld_packet).header.len;
-        let crc = lf_crc(&packet as *const FmrPacket as *const c_void, len as u32);
+        let crc = lf_crc(&packet as *const FmrPacket as *const u8, len as u32);
         (*dyld_packet).header.crc = crc;
 
         let packet_slice = slice::from_raw_parts(&packet as *const FmrPacket as *const u8, len as usize);
@@ -303,25 +305,38 @@ pub trait LfDevice: Read + Write {
         function: LfFunction,
         ret: LfType,
         args: Args,
-    ) -> i32 {
-
+    ) -> Option<u32> {
         let mut packet = FmrPacket::new(FmrClass::call);
+        let mut call_packet = unsafe { packet.into_call() };
+
         let argv: Vec<_> = args.iter().map(|arg| arg.0).collect();
         let module = self.load(module).expect("should get module");
 
-        create_call(&mut packet, module, function, ret, &argv);
-        println!("Packet header: {:?}", unsafe { packet.base.header });
-        println!("Packet payload: {:?}", unsafe { packet.base.payload });
+        create_call(&mut call_packet, module as u32, function, ret, &argv);
+        println!("Packet header: {:?}", unsafe { call_packet.header });
 
+        // Calculate the crc for the packet
+        let len = call_packet.header.len as u32;
+        let crc = lf_crc(&call_packet as *const FmrPacketCall as *const u8, len);
+        call_packet.header.crc = crc;
+
+        // Send the packet as raw bytes
         let packet_slice: &[u8] = unsafe {
-            let data = &packet as *const FmrPacket as *const u8;
-            let len = packet.base.header.len as usize;
-            slice::from_raw_parts(data, len)
+            let data = &call_packet as *const FmrPacketCall as *const u8;
+            slice::from_raw_parts(data, size_of::<FmrPacket>())
         };
-
         self.write(packet_slice);
 
-        0
+        // Receive the result as raw bytes
+        let result = unsafe {
+            let mut result = FmrReturn { value: 0, error: 0 };
+            let result_pointer = &mut result as *mut FmrReturn as *mut u8;
+            let mut result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
+            self.read(result_slice);
+            result
+        };
+
+        Some(result.value as u32)
     }
 
     /// Given a module name, returns the index of that module on this device if the module is
@@ -336,19 +351,51 @@ pub trait LfDevice: Read + Write {
         // Convert one union variant to another
         let mut dyld_packet = unsafe { packet.into_dyld() };
 
-        None
+        let module_cstring = match CString::new(module) {
+            Ok(cstr) => cstr,
+            Err(_) => return None,
+        };
+
+        // Copy the module name into the packet
+        let buffer = module_cstring.as_bytes_with_nul();
+        let module = &mut (dyld_packet.module) as *mut *mut c_char as *mut u8;
+        unsafe { ptr::copy(buffer.as_ptr(), module, buffer.len()) };
+        dyld_packet.header.len += buffer.len() as u16;
+
+        // Calculate the crc for the packet
+        let len = dyld_packet.header.len as u32;
+        let crc = lf_crc(&dyld_packet as *const FmrPacketDyld as *const u8, len);
+        dyld_packet.header.crc = crc;
+
+        // Send the packet as raw bytes
+        let packet_buffer: &[u8] = unsafe {
+            let data = &dyld_packet as *const FmrPacketDyld as *const u8;
+            slice::from_raw_parts(data, size_of::<FmrPacket>())
+        };
+        self.write(packet_buffer);
+
+        // Receive the result as raw bytes
+        let result = unsafe {
+            let mut result = FmrReturn { value: 0, error: 0 };
+            let result_pointer = &mut result as *mut FmrReturn as *mut u8;
+            let mut result_slice = slice::from_raw_parts_mut(result_pointer, size_of::<FmrReturn>());
+            self.read(result_slice);
+            result
+        };
+
+        if result.error != 0 { return None }
+        Some(result.value as u32)
     }
 }
 
 pub fn create_call(
-    packet: &mut FmrPacket,
+    packet: &mut FmrPacketCall,
     module: LfModule,
     function: LfFunction,
     return_type: LfType,
-    args: &[LfArg]
+    args: &[LfArg],
 ) -> Result<(), ()> {
     let argc = args.len() as LfArgc;
-    let mut packet = unsafe { packet.call };
 
     // Populate call packet
     packet.call.module = module as u8;
@@ -393,7 +440,8 @@ mod tests {
         ];
 
         let mut packet = FmrPacket::new(FmrClass::call);
-        create_call(&mut packet, 3, 5, LfType::void, &args);
+        let mut call_packet = unsafe { packet.into_call() };
+        create_call(&mut call_packet, 3, 5, LfType::void, &args);
 
         let payload = unsafe { packet.base.payload };
         for chunk in payload.chunks(8) {

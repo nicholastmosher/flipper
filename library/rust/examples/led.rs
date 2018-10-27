@@ -1,8 +1,8 @@
 use libusb::Context;
 use flipper_core::{
+    LfDevice,
+    LfType,
     lf::Args,
-    fmr::LfDevice,
-    fmr::LfType,
     carbon::Carbon,
 };
 
@@ -20,7 +20,7 @@ impl<'a, T: LfDevice> Led<'a, T> {
             .append(red)
             .append(green)
             .append(blue);
-        let module: &str = "len";
+        let module: &str = "led";
         println!("{}", module.len());
         self.device.invoke(module, 0, LfType::void, args);
     }
@@ -32,5 +32,5 @@ fn main() {
     let carbon = carbons.first_mut().expect("should get a Flipper on usb");
 
     let mut led = Led::new(carbon.atmegau2());
-    led.rgb(10, 10, 0);
+    led.rgb(0, 10, 10);
 }

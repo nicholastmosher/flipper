@@ -21,6 +21,9 @@ mod fmr;
 pub mod device;
 pub mod carbon;
 
+pub use self::fmr::LfDevice;
+pub use self::fmr::LfType;
+
 use libc::{c_void, c_char};
 use std::ffi::CString;
 use std::ptr;

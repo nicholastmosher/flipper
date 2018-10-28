@@ -9,8 +9,6 @@ use std::io::{Read, Write};
 use std::collections::HashMap;
 use std::os::raw::c_char;
 
-use crate::capi::lf_crc;
-
 pub trait LfDevice: Read + Write {
     fn modules(&mut self) -> &mut Modules;
 
@@ -33,7 +31,7 @@ pub trait LfDevice: Read + Write {
 
         // Calculate the crc for the packet
         let len = call_packet.header.len as u32;
-        let crc = lf_crc(&call_packet as *const _ as *const u8, len);
+        let crc = calculate_crc(&call_packet as *const _ as *const u8, len);
         call_packet.header.crc = crc;
 
         // Send the packet as raw bytes
@@ -69,7 +67,7 @@ pub trait LfDevice: Read + Write {
 
         // Calculate the crc for the packet
         let len = dyld_packet.header.len as u32;
-        let crc = lf_crc(&dyld_packet as *const _ as *const u8, len);
+        let crc = calculate_crc(&dyld_packet as *const _ as *const u8, len);
         dyld_packet.header.crc = crc;
 
         // Send the packet as raw bytes
@@ -110,7 +108,7 @@ pub trait LfDevice: Read + Write {
 
         // Calculate the crc for the packet
         let len = push_packet.header.len as u32;
-        let crc = lf_crc(&push_packet as *const _ as *const u8, len);
+        let crc = calculate_crc(&push_packet as *const _ as *const u8, len);
         push_packet.header.crc = crc;
 
         // Write the packet as raw bytes
@@ -147,7 +145,7 @@ pub trait LfDevice: Read + Write {
 
         // Calculate the crc for the packet
         let len = pull_packet.header.len as u32;
-        let crc = lf_crc(&pull_packet as *const _ as *const u8, len);
+        let crc = calculate_crc(&pull_packet as *const _ as *const u8, len);
         pull_packet.header.crc = crc;
 
         // Write the packet as raw bytes
@@ -176,7 +174,7 @@ pub trait LfDevice: Read + Write {
 
         // Calculate the crc for the packet
         let len = malloc_packet.header.len as u32;
-        let crc = lf_crc(&malloc_packet as *const _ as *const u8, len);
+        let crc = calculate_crc(&malloc_packet as *const _ as *const u8, len);
         malloc_packet.header.crc = crc;
 
         // Send the packet as raw bytes
@@ -202,7 +200,7 @@ pub trait LfDevice: Read + Write {
 
         // Calculate the crc for the packet
         let len = free_packet.header.len as u32;
-        let crc = lf_crc(&free_packet as *const _ as *const u8, len);
+        let crc = calculate_crc(&free_packet as *const _ as *const u8, len);
         free_packet.header.crc = crc;
 
         // Send the packet as raw bytes
@@ -446,6 +444,26 @@ pub fn create_call(
     }
 
     Ok(())
+}
+
+/// Given a memory buffer and a length, generates a CRC of the data in the buffer.
+pub fn calculate_crc(data: *const u8, length: u32) -> u16 {
+    const POLY: u16 = 0x1021;
+    let mut crc: u16 = 0;
+    for i in 0..length {
+        unsafe {
+            let word = ptr::read(data.offset(i as isize) as *const u16);
+            crc = crc ^ word << 8;
+            for _ in 0..8 {
+                if crc & 0x8000 != 0 {
+                    crc = crc << 1 ^ POLY;
+                } else {
+                    crc = crc << 1;
+                }
+            }
+        }
+    }
+    crc
 }
 
 #[cfg(test)]

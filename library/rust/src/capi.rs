@@ -207,25 +207,3 @@ pub extern "C" fn lf_dyld(
 
     LfStatus::Success as u32
 }
-
-/// Given a memory buffer and a length, generates a CRC of the data in the buffer.
-#[no_mangle]
-pub extern "C" fn lf_crc(data: *const u8, length: u32) -> u16 {
-    const POLY: u16 = 0x1021;
-    let mut crc: u16 = 0;
-    for i in 0..length {
-        unsafe {
-            let word = ptr::read(data.offset(i as isize) as *const u16);
-            crc = crc ^ word << 8;
-            for _ in 0..8 {
-                if crc & 0x8000 != 0 {
-                    crc = crc << 1 ^ POLY;
-                } else {
-                    crc = crc << 1;
-                }
-            }
-        }
-    }
-    crc
-}
-

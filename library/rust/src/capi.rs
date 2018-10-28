@@ -11,13 +11,14 @@ use crate::device::{UsbDevice, AtsamDevice};
 pub type LfResult = u32;
 
 #[repr(u32)]
-enum LfStatus {
+pub enum LfStatus {
     Success = 0,
     NullPointer = 1,
     InvalidString = 2,
     PackageNotLoaded = 3,
     NoDevicesFound = 4,
     IndexOutOfBounds = 5,
+    IllegalType = 6,
 }
 
 /// Returns an opaque pointer to a list of Carbon devices and the length of the list.
@@ -27,7 +28,8 @@ enum LfStatus {
 ///
 /// The pointer returned as `devices` is heap-allocated and owned by the caller. The
 /// proper way to release the device list is by using `carbon_release`.
-pub extern "C" fn carbon_attach(devices: *mut *mut Carbons, length: *mut u32) -> LfResult {
+#[no_mangle]
+pub extern "C" fn carbon_attach(devices: *mut *mut c_void, length: *mut u32) -> LfResult {
     let carbons = Carbon::attach();
     if carbons.len() == 0 { return LfStatus::NoDevicesFound as u32; }
 
@@ -36,7 +38,7 @@ pub extern "C" fn carbon_attach(devices: *mut *mut Carbons, length: *mut u32) ->
     let carbons_pointer = Box::into_raw(carbons);
 
     unsafe {
-        *devices = carbons_pointer;
+        *devices = carbons_pointer as *mut c_void;
         *length = carbons_length as u32;
     }
 
@@ -52,12 +54,13 @@ pub extern "C" fn carbon_attach(devices: *mut *mut Carbons, length: *mut u32) ->
 /// If the given devices pointer is NULL, then NULL is returned.
 ///
 /// If the given index is out of bounds for the device list, then NULL is returned.
-pub extern "C" fn carbon_select(devices: *mut Carbons, index: u32) -> *mut Carbon {
+#[no_mangle]
+pub extern "C" fn carbon_select(devices: *mut c_void, index: u32) -> *mut c_void {
     if devices == ptr::null_mut() { return ptr::null_mut() }
 
-    let devices = unsafe { &mut *devices };
+    let devices = unsafe { &mut *(devices as *mut Carbons) };
     match devices.get_mut(index as usize) {
-        Some(device) => device as *mut Carbon,
+        Some(device) => device as *mut _ as *mut c_void,
         None => ptr::null_mut(),
     }
 }
@@ -67,14 +70,20 @@ pub extern "C" fn carbon_select(devices: *mut Carbons, index: u32) -> *mut Carbo
 /// This function does not take ownership of the Carbon device passed to it, so the caller is
 /// responsible for managing its memory.
 ///
+/// The returned handle to the atmegau2 device is heap-allocated and must be freed with
+/// `carbon_release`.
+///
 /// The returned handle to the atmegau2 device is valid only as long as its parent Carbon device
 /// is valid, which is in turn only valid for as long as the containing Carbon devices list is.
 /// In other words, for a device list `devices`, once `carbon_release(devices)` has been called,
 /// the LfDevice handle that was returned from this function will be invalid.
-pub extern "C" fn carbon_atmegau2(carbon: *mut Carbon) -> *mut c_void {
+#[no_mangle]
+pub extern "C" fn carbon_atmegau2(carbon: *mut c_void) -> *mut c_void {
     if carbon == ptr::null_mut() { return ptr::null_mut() }
-    let carbon = unsafe { &mut *carbon };
-    carbon.atmegau2() as *mut UsbDevice as *mut c_void
+    let carbon = unsafe { &mut *(carbon as *mut Carbon) };
+    let atmegau2 = carbon.atmegau2() as *mut LfDevice;
+    let boxed_atmegau2 = Box::new(atmegau2);
+    Box::into_raw(boxed_atmegau2) as *mut c_void
 }
 
 /// Given a handle to a Carbon device, returns a handle to the inner atsam4s LfDevice.
@@ -82,24 +91,31 @@ pub extern "C" fn carbon_atmegau2(carbon: *mut Carbon) -> *mut c_void {
 /// This function does not take ownership of the Carbon device passed to it, so the caller is
 /// responsible for managing its memory.
 ///
+/// The returned handle to the atsam4s device is heap-allocated and must be freed with
+/// `carbon_release`.
+///
 /// The returned handle to the atsam4s device is valid only as long as its parent Carbon device
 /// is valid, which is in turn only valid for as long as the containing Carbon devices list is.
 /// In other words, for a device list `devices`, once `carbon_release(devices)` has been called,
 /// the LfDevice handle that was returned from this function will be invalid.
-pub extern "C" fn carbon_atsam4s(carbon: *mut Carbon) -> *mut c_void {
+#[no_mangle]
+pub extern "C" fn carbon_atsam4s(carbon: *mut c_void) -> *mut c_void {
     if carbon == ptr::null_mut() { return ptr::null_mut() }
-    let carbon = unsafe { &mut *carbon };
-    carbon.atsam4s() as *mut AtsamDevice<_> as *mut c_void
+    let carbon = unsafe { &mut *(carbon as *mut Carbon) };
+    let atsam4s = carbon.atsam4s() as *mut LfDevice;
+    let boxed_atsam4s = Box::new(atsam4s);
+    Box::into_raw(boxed_atsam4s) as *mut c_void
 }
 
-/// Releases the memory used by the Carbon device set.
+/// Releases the memory used by the boxed resource.
 ///
-/// This function takes ownership of the devices pointer, then frees the backing memory. The
-/// devices pointer should never be accessed after calling this function.
-pub extern "C" fn carbon_release(devices: *mut Carbons) -> LfResult {
-    // Re-create the Box<Carbons> from the raw pointer.
+/// This function takes ownership of the resource pointer, then frees the backing memory. The
+/// pointer should never be accessed after calling this function.
+#[no_mangle]
+pub extern "C" fn carbon_release(resource: *mut c_void) -> LfResult {
+    // Re-create the Box<_> from the raw pointer.
     // When this function ends the box will be dropped.
-    let _carbons = unsafe { Box::from_raw(devices) };
+    let _ = unsafe { Box::from_raw(resource as *mut _) };
     LfStatus::Success as u32
 }
 
@@ -128,13 +144,14 @@ pub extern "C" fn carbon_release(devices: *mut Carbons) -> LfResult {
 /// to manage its memory.
 ///
 /// * `argc`: A count of the number of arguments in `argv`.
+#[no_mangle]
 pub extern "C" fn lf_create_call(
-    module: LfModule,
-    function: LfFunction,
-    return_type: LfType,
-    argv: *const LfArg,
-    argc: LfArgc,
-    packet: *mut FmrPacket,
+    module: u32,
+    function: u8,
+    return_type: u8,
+    argv: *const c_void,
+    argc: u8,
+    packet: *mut c_void,
 ) -> LfResult {
     if argv == ptr::null() { return 1; }
     if packet == ptr::null_mut() { return 1; }
@@ -142,8 +159,13 @@ pub extern "C" fn lf_create_call(
     // Convert raw C types into safe Rust types.
     let (packet, args) = unsafe {
         let packet = &mut *(packet as *mut FmrPacketCall);
-        let args = slice::from_raw_parts(argv, argc as usize);
+        let args = slice::from_raw_parts(argv as *const LfArg, argc as usize);
         (packet, args)
+    };
+
+    let return_type = match LfType::from(return_type) {
+        Some(ret) => ret,
+        None => return LfStatus::IllegalType as LfResult,
     };
 
     let status = match create_call(packet, module, function, return_type, args) {
@@ -164,12 +186,13 @@ pub extern "C" fn lf_create_call(
 ///
 /// `module`: A string that is the name of the module we want to look up on the device.
 /// This function does not take ownership of `module`, so the caller is responsible for its memory.
+#[no_mangle]
 pub extern "C" fn lf_dyld(
-    device: *mut LfDevice,
+    device: *mut c_void,
     module: *const c_char,
     index: *mut u32,
 ) -> LfResult {
-    let mut device: Box<dyn LfDevice> = unsafe { Box::from_raw(device) };
+    let mut device: Box<Box<dyn LfDevice>> = unsafe { Box::from_raw(device as *mut _) };
 
     let module_cstr = unsafe { CStr::from_ptr(module) };
     let module_string = match module_cstr.to_str() {
@@ -186,6 +209,7 @@ pub extern "C" fn lf_dyld(
 }
 
 /// Given a memory buffer and a length, generates a CRC of the data in the buffer.
+#[no_mangle]
 pub extern "C" fn lf_crc(data: *const u8, length: u32) -> u16 {
     const POLY: u16 = 0x1021;
     let mut crc: u16 = 0;

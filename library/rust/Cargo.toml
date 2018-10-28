@@ -8,6 +8,7 @@ edition = "2018"
 [lib]
 name = "flipper_core"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 libc = "0.2.0"

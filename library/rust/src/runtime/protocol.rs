@@ -213,6 +213,23 @@ impl LfType {
             _ => 0,
         }
     }
+
+    pub fn from(byte: u8) -> Option<LfType> {
+        match byte {
+            0 => Some(LfType::uint8),
+            1 => Some(LfType::uint16),
+            2 => Some(LfType::void),
+            3 => Some(LfType::uint32),
+            4 => Some(LfType::int),
+            6 => Some(LfType::ptr),
+            7 => Some(LfType::uint64),
+            8 => Some(LfType::int8),
+            9 => Some(LfType::int16),
+            11 => Some(LfType::int32),
+            15 => Some(LfType::int64),
+            _ => None
+        }
+    }
 }
 
 impl Debug for FmrPayload {

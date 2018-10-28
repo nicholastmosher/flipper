@@ -1,7 +1,6 @@
 use std::io::{Read, Write, Result};
 use crate::runtime::{LfDevice, Args};
 use crate::runtime::protocol::LfType;
-use crate::lf;
 
 pub enum UartBaud {
     FMR,
@@ -45,13 +44,13 @@ impl<'a, T: LfDevice> Uart0<'a, T> {
 
 impl<'a, T: LfDevice> Write for Uart0<'a, T> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        let device_buffer = lf::malloc(self.device, buf.len() as u32);
-        lf::push(self.device, &device_buffer, buf);
+        let device_buffer = self.device.malloc(buf.len() as u32).expect("should malloc");
+        self.device.push(device_buffer, buf);
         let args = Args::new()
             .append(device_buffer)
             .append(buf.len() as u32);
-        lf::invoke::<(), T>(self.device, "uart0", 2, args);
-        lf::free(self.device, device_buffer);
+        self.device.invoke("uart0", 2, LfType::void, args);
+        self.device.free(device_buffer);
         Ok(buf.len())
     }
     fn flush(&mut self) -> Result<()> {
@@ -62,13 +61,12 @@ impl<'a, T: LfDevice> Write for Uart0<'a, T> {
 impl<'a, T: LfDevice> Read for Uart0<'a, T> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() == 0 { return Ok(0) }
-        let device_buffer = lf::malloc(self.device, buf.len() as u32);
+        let device_buffer = self.device.malloc(buf.len() as u32).expect("should malloc");
         let args = Args::new()
             .append(device_buffer)
             .append(buf.len() as u32);
-        lf::invoke::<(), T>(self.device, "uart0", 3, args);
-        lf::pull(self.device, buf, &device_buffer);
-        lf::free(self.device, device_buffer);
+        self.device.invoke("uart0", 3, LfType::void, args);
+        self.device.free(device_buffer);
         Ok(buf.len())
     }
 }

@@ -49,7 +49,7 @@ pub union FmrPacket {
     pub call: FmrPacketCall,
     pub data: FmrPacketPushPull,
     pub dyld: FmrPacketDyld,
-    pub memory: FmrPacketMalloc,
+    pub memory: FmrPacketMemory,
 }
 
 impl FmrPacket {
@@ -78,7 +78,7 @@ pub trait FmrAsBytes: Sized {
 
 impl From<FmrPacket> for FmrPacketCall {
     fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketCall) }
+        unsafe { *(&mut packet as *mut _ as *mut FmrPacketCall) }
     }
 }
 
@@ -86,7 +86,7 @@ impl FmrAsBytes for FmrPacketCall { }
 
 impl From<FmrPacket> for FmrPacketPushPull {
     fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketPushPull) }
+        unsafe { *(&mut packet as *mut _ as *mut FmrPacketPushPull) }
     }
 }
 
@@ -94,19 +94,19 @@ impl FmrAsBytes for FmrPacketPushPull { }
 
 impl From<FmrPacket> for FmrPacketDyld {
     fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketDyld) }
+        unsafe { *(&mut packet as *mut _ as *mut FmrPacketDyld) }
     }
 }
 
 impl FmrAsBytes for FmrPacketDyld { }
 
-impl From<FmrPacket> for FmrPacketMalloc {
+impl From<FmrPacket> for FmrPacketMemory {
     fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut FmrPacket as *mut FmrPacketMalloc) }
+        unsafe { *(&mut packet as *mut _ as *mut FmrPacketMemory) }
     }
 }
 
-impl FmrAsBytes for FmrPacketMalloc { }
+impl FmrAsBytes for FmrPacketMemory { }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
@@ -150,7 +150,7 @@ pub struct FmrPacketDyld {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-pub struct FmrPacketMalloc {
+pub struct FmrPacketMemory {
     pub header: FmrHeader,
     pub size: u32,
     pub ptr: u64,

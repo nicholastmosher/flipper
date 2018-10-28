@@ -1,4 +1,5 @@
 pub mod protocol;
+
 use self::protocol::*;
 
 use std::ptr;
@@ -32,7 +33,7 @@ pub trait LfDevice: Read + Write {
 
         // Calculate the crc for the packet
         let len = call_packet.header.len as u32;
-        let crc = lf_crc(&call_packet as *const FmrPacketCall as *const u8, len);
+        let crc = lf_crc(&call_packet as *const _ as *const u8, len);
         call_packet.header.crc = crc;
 
         // Send the packet as raw bytes
@@ -62,13 +63,13 @@ pub trait LfDevice: Read + Write {
 
         // Copy the module name into the packet
         let buffer = module_cstring.as_bytes_with_nul();
-        let module = unsafe { &mut (dyld_packet.module) as *mut *mut c_char as *mut u8 };
-        unsafe { ptr::copy(buffer.as_ptr(), module, buffer.len()) };
+        let module_cstr = unsafe { &mut (dyld_packet.module) as *mut *mut c_char as *mut u8 };
+        unsafe { ptr::copy(buffer.as_ptr(), module_cstr, buffer.len()) };
         dyld_packet.header.len += buffer.len() as u16;
 
         // Calculate the crc for the packet
         let len = dyld_packet.header.len as u32;
-        let crc = lf_crc(&dyld_packet as *const FmrPacketDyld as *const u8, len);
+        let crc = lf_crc(&dyld_packet as *const _ as *const u8, len);
         dyld_packet.header.crc = crc;
 
         // Send the packet as raw bytes
@@ -78,22 +79,104 @@ pub trait LfDevice: Read + Write {
         let mut result = FmrReturn::new();
         self.read(unsafe { result.as_mut_bytes() });
 
-        if result.error != 0 { return None }
+        if result.error != 0 { return None; }
+
+        // Register this module so we don't have to look it up in the future
+        let modules = self.modules();
+        let module_index = result.value as u32;
+        let module = Module::new(module.to_string(), module_index, 0);
+        modules.register(module);
+
         Some(result.value as u32)
     }
 
+    /// Pushes a buffer of data to a location in Flipper's memory space.
+    ///
+    /// The given pointer must be a valid location in Flipper's memory, obtained by using
+    /// `LfDevice::malloc`.
+    ///
+    /// The data buffer to write must be no larger than the size of the memory allocated from
+    /// Flipper. If the pointer being used was obtained using `device.malloc(size)`, then
+    /// `data.len()` must be less than or equal to `size`.
+    fn push(&mut self, pointer: LfPointer, data: &[u8]) -> Option<()> {
+
+        // Create a push packet
+        let packet = FmrPacket::new(FmrClass::push);
+        let mut push_packet = FmrPacketPushPull::from(packet);
+
+        // Write the length and address of the target memory buffer into the packet
+        push_packet.len = data.len() as u32;
+        push_packet.ptr = pointer.0 as u64;
+
+        // Calculate the crc for the packet
+        let len = push_packet.header.len as u32;
+        let crc = lf_crc(&push_packet as *const _ as *const u8, len);
+        push_packet.header.crc = crc;
+
+        // Write the packet as raw bytes
+        self.write(unsafe { push_packet.as_bytes() });
+
+        // Write the push payload as raw bytes
+        self.write(data);
+
+        // Read the result as raw bytes
+        let mut result = FmrReturn::new();
+        self.read(unsafe { result.as_mut_bytes() });
+
+        if result.error != 0 { return None; }
+        Some(())
+    }
+
+    /// Pulls a buffer of data from a location in Flipper's memory space.
+    ///
+    /// The given pointer must be a valid location in Flipper's memory, obtained by using
+    /// `LfDevice::malloc`.
+    ///
+    /// The local buffer to write to must be no larger than the size of the memory allocated from
+    /// Flipper. If the pointer being used was obtained using `device.malloc(size)`, then
+    /// `data.len()` must be less than or equal to `size`.
+    fn pull(&mut self, pointer: LfPointer, buffer: &mut [u8]) -> Option<()> {
+
+        // Create a pull packet
+        let packet = FmrPacket::new(FmrClass::pull);
+        let mut pull_packet = FmrPacketPushPull::from(packet);
+
+        // Write the length and address of the target memory buffer into the packet
+        pull_packet.len = buffer.len() as u32;
+        pull_packet.ptr = pointer.0 as u64;
+
+        // Calculate the crc for the packet
+        let len = pull_packet.header.len as u32;
+        let crc = lf_crc(&pull_packet as *const _ as *const u8, len);
+        pull_packet.header.crc = crc;
+
+        // Write the packet as raw bytes
+        self.write(unsafe { pull_packet.as_bytes() });
+
+        // Read the pull payload as raw bytes
+        self.read(buffer);
+
+        // Read the result as raw bytes
+        let mut result = FmrReturn::new();
+        self.read(unsafe { result.as_mut_bytes() });
+
+        if result.error != 0 { return None; }
+        Some(())
+    }
+
+    /// Allocates a buffer of data of the given size in Flipper's memory space.
     fn malloc(&mut self, size: u32) -> Option<LfPointer> {
 
         // Create a malloc packet
         let packet = FmrPacket::new(FmrClass::malloc);
-        let mut malloc_packet = FmrPacketMalloc::from(packet);
+        let mut malloc_packet = FmrPacketMemory::from(packet);
 
         // Write the size of the requested buffer in the packet
         malloc_packet.size = size;
 
         // Calculate the crc for the packet
         let len = malloc_packet.header.len as u32;
-        let crc = lf_crc(&malloc_packet as *const FmrPacketMalloc as *const u8, len);
+        let crc = lf_crc(&malloc_packet as *const _ as *const u8, len);
         malloc_packet.header.crc = crc;
 
         // Send the packet as raw bytes
@@ -103,8 +186,34 @@ pub trait LfDevice: Read + Write {
         let mut result = FmrReturn::new();
         self.read(unsafe { result.as_mut_bytes() });
 
-        if result.error != 0 { return None }
+        if result.error != 0 { return None; }
         Some(LfPointer(result.value as u32))
+    }
+
+    /// Frees a buffer of memory in Flipper's memory space.
+    fn free(&mut self, pointer: LfPointer) -> Option<()> {
+
+        // Create a free packet
+        let packet = FmrPacket::new(FmrClass::free);
+        let mut free_packet = FmrPacketMemory::from(packet);
+
+        // Write the address of the buffer to free into the packet
+        free_packet.ptr = pointer.0 as u64;
+
+        // Calculate the crc for the packet
+        let len = free_packet.header.len as u32;
+        let crc = lf_crc(&free_packet as *const _ as *const u8, len);
+        free_packet.header.crc = crc;
+
+        // Send the packet as raw bytes
+        self.write(unsafe { free_packet.as_bytes() });
+
+        // Read the result as raw bytes
+        let mut result = FmrReturn::new();
+        self.read(unsafe { result.as_mut_bytes() });
+
+        if result.error != 0 { return None; }
+        Some(())
     }
 }
 

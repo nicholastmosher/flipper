@@ -17,8 +17,8 @@ pub trait LfDevice: Read + Write {
         module: &str,
         function: LfFunction,
         ret: LfType,
-        args: Args,
-    ) -> Option<u32> {
+        args: &Args,
+    ) -> Option<u64> {
 
         // Create a call packet
         let packet = FmrPacket::new(FmrClass::call);
@@ -41,14 +41,14 @@ pub trait LfDevice: Read + Write {
         let mut result = FmrReturn::new();
         self.read(unsafe { result.as_mut_bytes() });
 
-        Some(result.value as u32)
+        Some(result.value)
     }
 
     /// Given a module name, returns the index of that module on this device if the module is
     /// installed. Otherwise, returns none.
-    fn load(&mut self, module: &str) -> Option<u32> {
+    fn load(&mut self, module: &str) -> Option<u64> {
         let modules = self.modules();
-        if let Some(module) = modules.find(module) { return Some(module); }
+        if let Some(module) = modules.find(module) { return Some(module as u64); }
 
         // Create a dyld packet
         let packet = FmrPacket::new(FmrClass::dyld);
@@ -85,7 +85,7 @@ pub trait LfDevice: Read + Write {
         let module = Module::new(module.to_string(), module_index, 0);
         modules.register(module);
 
-        Some(result.value as u32)
+        Some(result.value)
     }
 
     /// Pushes a buffer of data to a location in Flipper's memory space.
@@ -263,7 +263,7 @@ pub struct Arg(pub(crate) LfArg);
 impl From<u8> for Arg {
     fn from(value: u8) -> Arg {
         Arg(LfArg {
-            kind: LfType::uint8,
+            kind: LfType::lf_uint8,
             value: value as LfValue,
         })
     }
@@ -272,7 +272,7 @@ impl From<u8> for Arg {
 impl From<u16> for Arg {
     fn from(value: u16) -> Arg {
         Arg(LfArg {
-            kind: LfType::uint16,
+            kind: LfType::lf_uint16,
             value: value as LfValue,
         })
     }
@@ -281,7 +281,7 @@ impl From<u16> for Arg {
 impl From<u32> for Arg {
     fn from(value: u32) -> Arg {
         Arg(LfArg {
-            kind: LfType::uint32,
+            kind: LfType::lf_uint32,
             value: value as LfValue,
         })
     }
@@ -290,7 +290,7 @@ impl From<u32> for Arg {
 impl From<u64> for Arg {
     fn from(value: u64) -> Arg {
         Arg(LfArg {
-            kind: LfType::uint64,
+            kind: LfType::lf_uint64,
             value: value as LfValue,
         })
     }
@@ -299,7 +299,7 @@ impl From<u64> for Arg {
 impl From<LfPointer> for Arg {
     fn from(address: LfPointer) -> Self {
         Arg(LfArg {
-            kind: LfType::ptr,
+            kind: LfType::lf_ptr,
             value: address.0 as LfValue,
         })
     }
@@ -321,7 +321,7 @@ impl Args {
     pub fn new() -> Self {
         Args(Vec::new())
     }
-    pub fn append<T: Into<Arg>>(mut self, arg: T) -> Self {
+    pub fn append<T: Into<Arg>>(&mut self, arg: T) -> &mut Self {
         self.0.push(arg.into());
         self
     }
@@ -353,7 +353,7 @@ pub trait LfReturnable: From<LfReturn> {
 }
 
 impl LfReturnable for () {
-    fn lf_type() -> LfType { LfType::void }
+    fn lf_type() -> LfType { LfType::lf_void }
 }
 
 impl From<LfReturn> for () {
@@ -361,7 +361,7 @@ impl From<LfReturn> for () {
 }
 
 impl LfReturnable for u8 {
-    fn lf_type() -> LfType { LfType::uint8 }
+    fn lf_type() -> LfType { LfType::lf_uint8 }
 }
 
 impl From<LfReturn> for u8 {
@@ -371,7 +371,7 @@ impl From<LfReturn> for u8 {
 }
 
 impl LfReturnable for u16 {
-    fn lf_type() -> LfType { LfType::uint16 }
+    fn lf_type() -> LfType { LfType::lf_uint16 }
 }
 
 impl From<LfReturn> for u16 {
@@ -381,7 +381,7 @@ impl From<LfReturn> for u16 {
 }
 
 impl LfReturnable for u32 {
-    fn lf_type() -> LfType { LfType::uint32 }
+    fn lf_type() -> LfType { LfType::lf_uint32 }
 }
 
 impl From<LfReturn> for u32 {
@@ -391,7 +391,7 @@ impl From<LfReturn> for u32 {
 }
 
 impl LfReturnable for u64 {
-    fn lf_type() -> LfType { LfType::uint64 }
+    fn lf_type() -> LfType { LfType::lf_uint64 }
 }
 
 impl From<LfReturn> for u64 {
@@ -399,7 +399,7 @@ impl From<LfReturn> for u64 {
 }
 
 impl LfReturnable for LfPointer {
-    fn lf_type() -> LfType { LfType::ptr }
+    fn lf_type() -> LfType { LfType::lf_ptr }
 }
 
 impl From<LfReturn> for LfPointer {
@@ -473,15 +473,15 @@ mod tests {
     #[test]
     fn test_create_call() {
         let args = vec![
-            LfArg { kind: LfType::uint8, value: 10 },
-            LfArg { kind: LfType::uint16, value: 1000 },
-            LfArg { kind: LfType::uint32, value: 2000 },
-            LfArg { kind: LfType::uint64, value: 4000 },
+            LfArg { kind: LfType::lf_uint8, value: 10 },
+            LfArg { kind: LfType::lf_uint16, value: 1000 },
+            LfArg { kind: LfType::lf_uint32, value: 2000 },
+            LfArg { kind: LfType::lf_uint64, value: 4000 },
         ];
 
         let mut packet = FmrPacket::new(FmrClass::call);
         let mut call_packet = unsafe { packet.into_call() };
-        create_call(&mut call_packet, 3, 5, LfType::void, &args);
+        create_call(&mut call_packet, 3, 5, LfType::lf_void, &args);
 
         let payload = unsafe { packet.base.payload };
         for chunk in payload.chunks(8) {

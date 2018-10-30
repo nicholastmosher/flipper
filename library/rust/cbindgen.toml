@@ -1,0 +1,9 @@
+[export]
+include = ["FmrClass"]
+exclude = ["MAX", "FMR_PACKET_SIZE", "FLIPPER_USB_VENDOR_ID", "FMR_MAGIC_NUMBER"]
+
+[struct]
+rename_fields = "SnakeCase"
+
+[enum]
+rename_variants = "SnakeCase"

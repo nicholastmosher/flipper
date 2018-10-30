@@ -3,9 +3,9 @@ use std::mem::size_of;
 use std::os::raw::c_char;
 use std::fmt::{self as fmt, Debug};
 
-const FMR_PACKET_SIZE: usize = 64;
-const FMR_MAGIC_NUMBER: u8 = 0xFE;
-const FMR_PAYLOAD_SIZE: usize = FMR_PACKET_SIZE - size_of::<FmrHeader>();
+pub const FMR_MAGIC_NUMBER: u8 = 0xFE;
+pub const FMR_PACKET_SIZE: usize = 64;
+pub const FMR_PAYLOAD_SIZE: usize = FMR_PACKET_SIZE - size_of::<FmrHeader>();
 
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
@@ -181,21 +181,21 @@ pub struct LfArg {
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
 pub enum LfType {
-    void = 2,
-    int = 4,
-    ptr = 6,
+    lf_void = 2,
+    lf_int = 4,
+    lf_ptr = 6,
 
     // Unsigned types
-    uint8 = 0,
-    uint16 = 1,
-    uint32 = 3,
-    uint64 = 7,
+    lf_uint8 = 0,
+    lf_uint16 = 1,
+    lf_uint32 = 3,
+    lf_uint64 = 7,
 
     // Signed types
-    int8 = 8,
-    int16 = 9,
-    int32 = 11,
-    int64 = 15,
+    lf_int8 = 8,
+    lf_int16 = 9,
+    lf_int32 = 11,
+    lf_int64 = 15,
 }
 
 impl LfType {
@@ -203,30 +203,30 @@ impl LfType {
 
     pub fn size(&self) -> usize {
         match self {
-            LfType::int8 | LfType::uint8 => 1,
-            LfType::int16 | LfType::uint16 => 2,
-            LfType::int32 | LfType::uint32 => 4,
-            LfType::int64 |
-            LfType::uint64 |
-            LfType::ptr |
-            LfType::void => 8,
+            LfType::lf_int8 | LfType::lf_uint8 => 1,
+            LfType::lf_int16 | LfType::lf_uint16 => 2,
+            LfType::lf_int32 | LfType::lf_uint32 => 4,
+            LfType::lf_int64 |
+            LfType::lf_uint64 |
+            LfType::lf_ptr |
+            LfType::lf_void => 8,
             _ => 0,
         }
     }
 
     pub fn from(byte: u8) -> Option<LfType> {
         match byte {
-            0 => Some(LfType::uint8),
-            1 => Some(LfType::uint16),
-            2 => Some(LfType::void),
-            3 => Some(LfType::uint32),
-            4 => Some(LfType::int),
-            6 => Some(LfType::ptr),
-            7 => Some(LfType::uint64),
-            8 => Some(LfType::int8),
-            9 => Some(LfType::int16),
-            11 => Some(LfType::int32),
-            15 => Some(LfType::int64),
+            0 => Some(LfType::lf_uint8),
+            1 => Some(LfType::lf_uint16),
+            2 => Some(LfType::lf_void),
+            3 => Some(LfType::lf_uint32),
+            4 => Some(LfType::lf_int),
+            6 => Some(LfType::lf_ptr),
+            7 => Some(LfType::lf_uint64),
+            8 => Some(LfType::lf_int8),
+            9 => Some(LfType::lf_int16),
+            11 => Some(LfType::lf_int32),
+            15 => Some(LfType::lf_int64),
             _ => None
         }
     }

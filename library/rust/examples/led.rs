@@ -19,7 +19,7 @@ impl<'a, T: LfDevice> Led<'a, T> {
             .append(red)
             .append(green)
             .append(blue);
-        self.device.invoke("led", 0, LfType::void, args);
+        self.device.invoke("led", 0, LfType::lf_void, args);
     }
 }
 

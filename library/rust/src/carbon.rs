@@ -1,10 +1,23 @@
+use std::io::{self as io, Read, Write};
 use std::slice::{Iter, IterMut};
 use libusb::Context;
+use crate::Client;
+use crate::runtime::{
+    protocol::LfType,
+    Modules,
+    Args,
+};
 use crate::device::{
     AtsamDevice,
     UsbDevice,
     get_usb_devices,
 };
+
+lazy_static! {
+    static ref ATMEGA_MODULES: Vec<&'static str> = vec![
+        "led",
+    ];
+}
 
 pub struct Carbons<'a> {
     context: Box<Context>,
@@ -43,13 +56,18 @@ impl<'a> Drop for Carbons<'a> {
 }
 
 pub struct Carbon<'a> {
+    modules: Modules,
     atmegau2: Box<UsbDevice<'a>>,
     atsam4s: Option<AtsamDevice<'a, UsbDevice<'a>>>,
 }
 
 impl<'a> Carbon<'a> {
     fn new(atmegau2: UsbDevice<'a>) -> Carbon<'a> {
-        let mut carbon = Carbon { atmegau2: Box::new(atmegau2), atsam4s: None };
+        let mut carbon = Carbon {
+            modules: Modules::new(),
+            atmegau2: Box::new(atmegau2),
+            atsam4s: None
+        };
 
         // Erase the lifetime of the UsbDevice. Since AtsamDevice requires a reference
         // to the UsbDevice, placing them both in the same struct creates a self-referential
@@ -77,12 +95,42 @@ impl<'a> Carbon<'a> {
         carbons
     }
 
-    pub fn atmegau2(&mut self) -> &mut UsbDevice<'a> {
+    fn atmegau2(&mut self) -> &mut UsbDevice<'a> {
         &mut self.atmegau2
     }
 
-    pub fn atsam4s(&mut self) -> &mut AtsamDevice<'a, UsbDevice<'a>> {
+    fn atsam4s(&mut self) -> &mut AtsamDevice<'a, UsbDevice<'a>> {
         self.atsam4s.as_mut().unwrap()
+    }
+}
+
+impl<'a> Read for Carbon<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.atsam4s().read(buf)
+    }
+}
+
+impl<'a> Write for Carbon<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.atsam4s().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.atsam4s().flush()
+    }
+}
+
+impl<'a> Client for Carbon<'a> {
+    fn modules(&mut self) -> &mut Modules {
+        &mut self.modules
+    }
+    fn invoke(&mut self, module: &str, function: u8, ret: LfType, args: &Args) -> Option<u64> {
+        let client: &mut Client = if ATMEGA_MODULES.contains(&module) {
+            self.atmegau2()
+        } else {
+            self.atsam4s()
+        };
+        client.invoke(module, function, ret, args)
     }
 }
 

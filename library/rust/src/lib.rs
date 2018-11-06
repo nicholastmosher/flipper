@@ -12,6 +12,8 @@ extern crate log;
 extern crate failure;
 extern crate libc;
 extern crate libusb;
+#[macro_use]
+extern crate lazy_static;
 
 #[macro_use]
 pub mod macros;

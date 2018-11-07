@@ -1,12 +1,10 @@
 use std::io::{self as io, Read, Write};
 use std::slice::{Iter, IterMut};
 use libusb::Context;
-use crate::Client;
-use crate::runtime::{
-    protocol::LfType,
-    Modules,
-    Args,
-};
+
+use crate::{Client, LfType, Args};
+use crate::runtime::Modules;
+use crate::error::Result;
 use crate::device::{
     AtsamDevice,
     UsbDevice,
@@ -62,6 +60,22 @@ pub struct Carbon<'a> {
 }
 
 impl<'a> Carbon<'a> {
+    pub fn attach_usb() -> Carbons<'a> {
+        let context = Context::new().expect("should get libusb context");
+        let mut carbons = Carbons { context: Box::new(context), devices: Some(vec![]) };
+
+        // Erase the lifetime of the context. We never allow a Carbon device to be moved
+        // out of the Carbons struct so we can guarantee that they live exactly as long
+        // as the libusb Context.
+        let context = unsafe { &mut *(carbons.context.as_mut() as *mut _) };
+
+        for atmegau2 in get_usb_devices(context) {
+            carbons.devices.as_mut().unwrap().push(Carbon::new(atmegau2))
+        }
+
+        carbons
+    }
+
     fn new(atmegau2: UsbDevice<'a>) -> Carbon<'a> {
         let mut carbon = Carbon {
             modules: Modules::new(),
@@ -77,22 +91,6 @@ impl<'a> Carbon<'a> {
         let atsam4s = AtsamDevice::new(atmegau2);
         carbon.atsam4s = Some(atsam4s);
         carbon
-    }
-
-    pub fn attach() -> Carbons<'a> {
-        let context = Context::new().expect("should get libusb context");
-        let mut carbons = Carbons { context: Box::new(context), devices: Some(vec![]) };
-
-        // Erase the lifetime of the context. We never allow a Carbon device to be moved
-        // out of the Carbons struct so we can guarantee that they live exactly as long
-        // as the libusb Context.
-        let context = unsafe { &mut *(carbons.context.as_mut() as *mut _) };
-
-        for atmegau2 in get_usb_devices(context) {
-            carbons.devices.as_mut().unwrap().push(Carbon::new(atmegau2))
-        }
-
-        carbons
     }
 
     fn atmegau2(&mut self) -> &mut UsbDevice<'a> {
@@ -124,7 +122,7 @@ impl<'a> Client for Carbon<'a> {
     fn modules(&mut self) -> &mut Modules {
         &mut self.modules
     }
-    fn invoke(&mut self, module: &str, function: u8, ret: LfType, args: &Args) -> Option<u64> {
+    fn invoke(&mut self, module: &str, function: u8, ret: LfType, args: &Args) -> Result<u64> {
         let client: &mut Client = if ATMEGA_MODULES.contains(&module) {
             self.atmegau2()
         } else {

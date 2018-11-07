@@ -1,8 +1,8 @@
-use flipper_core::{
+use flipper::{
     Client,
     LfType,
-    runtime::Args,
-    carbon::Carbon,
+    Args,
+    Carbon,
 };
 
 struct Led<'a, T: Client> {
@@ -24,9 +24,9 @@ impl<'a, T: Client> Led<'a, T> {
 }
 
 fn main() {
-    let mut carbons = Carbon::attach();
+    let mut carbons = Carbon::attach_usb();
     let carbon = carbons.iter_mut().next().expect("should get a Flipper on usb");
 
-    let mut led = Led::new(carbon.atmegau2());
+    let mut led = Led::new(carbon);
     led.rgb(10, 05, 10);
 }

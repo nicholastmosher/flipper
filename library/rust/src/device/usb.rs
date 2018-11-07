@@ -12,6 +12,7 @@ use libusb::{
 
 const FLIPPER_USB_VENDOR_ID: u16 = 0x16C0;
 
+#[allow(unused)]
 pub struct UsbDevice<'a> {
     device: Device<'a>,
     handle: DeviceHandle<'a>,
@@ -136,13 +137,6 @@ fn find_endpoint(
     }
 
     None
-}
-
-fn configure_endpoint(handle: &mut DeviceHandle, endpoint: &Endpoint) -> libusb::Result<()> {
-    handle.set_active_configuration(endpoint.config)?;
-    handle.claim_interface(endpoint.iface)?;
-    handle.set_alternate_setting(endpoint.iface, endpoint.setting)?;
-    Ok(())
 }
 
 #[cfg(test)]

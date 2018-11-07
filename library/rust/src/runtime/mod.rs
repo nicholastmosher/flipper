@@ -9,6 +9,11 @@ use std::io::{Read, Write};
 use std::collections::HashMap;
 use std::os::raw::c_char;
 
+use crate::error::{
+    Result,
+    FlipperError,
+};
+
 pub trait Client: Read + Write {
     fn modules(&mut self) -> &mut Modules;
 
@@ -18,7 +23,7 @@ pub trait Client: Read + Write {
         function: LfFunction,
         ret: LfType,
         args: &Args,
-    ) -> Option<u64> {
+    ) -> Result<u64> {
 
         // Create a call packet
         let mut packet = FmrPacket::new(FmrClass::call);
@@ -26,7 +31,8 @@ pub trait Client: Read + Write {
         // Write the module index and function arguments into the packet
         let module = self.load(module).expect("should get module");
         let argv: Vec<_> = args.iter().map(|arg| arg.0).collect();
-        create_call(&mut packet, module as u32, function, ret, &argv);
+        create_call(&mut packet, module as u32, function, ret, &argv)
+            .ok_or(FlipperError::Invoke)?;
 
         // Calculate the crc for the packet
         let len = packet.header.len as u32;
@@ -34,28 +40,28 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Receive the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() });
+        self.read(unsafe { result.as_bytes_mut() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
-        Some(result.value)
+        Ok(result.value)
     }
 
     /// Given a module name, returns the index of that module on this device if the module is
     /// installed. Otherwise, returns none.
-    fn load(&mut self, module: &str) -> Option<u64> {
+    fn load(&mut self, module: &str) -> Result<u64> {
         let modules = self.modules();
-        if let Some(module) = modules.find(module) { return Some(module as u64); }
+        if let Some(module) = modules.find(module) { return Ok(module as u64); }
 
         // Create a dyld packet
         let mut packet = FmrPacket::new(FmrClass::dyld);
 
-        let module_cstring = match CString::new(module) {
-            Ok(cstr) => cstr,
-            Err(_) => return None,
-        };
+        let module_cstring = CString::new(module)
+            .map_err(|_| FlipperError::Load)?;
 
         // Copy the module name into the packet
         let buffer = module_cstring.as_bytes_with_nul();
@@ -69,13 +75,15 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Receive the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() });
+        self.read(unsafe { result.as_bytes_mut() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
-        if result.error != 0 { return None; }
+        if result.error != 0 { Err(FlipperError::Load)?; }
 
         // Register this module so we don't have to look it up in the future
         let modules = self.modules();
@@ -83,7 +91,7 @@ pub trait Client: Read + Write {
         let module = Module::new(module.to_string(), module_index, 0);
         modules.register(module);
 
-        Some(result.value)
+        Ok(result.value)
     }
 
     /// Pushes a buffer of data to a location in Flipper's memory space.
@@ -94,7 +102,7 @@ pub trait Client: Read + Write {
     /// The data buffer to write must be no larger than the size of the memory allocated from
     /// Flipper. If the pointer being used was obtained using `device.malloc(size)`, then
     /// `data.len()` must be less than or equal to `size`.
-    fn push(&mut self, pointer: LfPointer, data: &[u8]) -> Option<()> {
+    fn push(&mut self, pointer: LfPointer, data: &[u8]) -> Result<()> {
 
         // Create a push packet
         let mut packet = FmrPacket::new(FmrClass::push);
@@ -111,17 +119,20 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Write the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Write the push payload as raw bytes
-        self.write(data);
+        self.write(data)
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() });
+        self.read(unsafe { result.as_bytes_mut() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
-        if result.error != 0 { return None; }
-        Some(())
+        if result.error != 0 { Err(FlipperError::Push)?; }
+        Ok(())
     }
 
     /// Pulls a buffer of data from a location in Flipper's memory space.
@@ -132,7 +143,7 @@ pub trait Client: Read + Write {
     /// The local buffer to write to must be no larger than the size of the memory allocated from
     /// Flipper. If the pointer being used was obtained using `device.malloc(size)`, then
     /// `data.len()` must be less than or equal to `size`.
-    fn pull(&mut self, pointer: LfPointer, buffer: &mut [u8]) -> Option<()> {
+    fn pull(&mut self, pointer: LfPointer, buffer: &mut [u8]) -> Result<()> {
 
         // Create a pull packet
         let mut packet = FmrPacket::new(FmrClass::pull);
@@ -149,21 +160,24 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Write the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the pull payload as raw bytes
-        self.read(buffer);
+        self.read(buffer)
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() });
+        self.read(unsafe { result.as_bytes_mut() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
-        if result.error != 0 { return None; }
-        Some(())
+        if result.error != 0 { Err(FlipperError::Pull)?; }
+        Ok(())
     }
 
     /// Allocates a buffer of data of the given size in Flipper's memory space.
-    fn malloc(&mut self, size: u32) -> Option<LfPointer> {
+    fn malloc(&mut self, size: u32) -> Result<LfPointer> {
 
         // Create a malloc packet
         let mut packet = FmrPacket::new(FmrClass::malloc);
@@ -179,18 +193,20 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() });
+        self.read(unsafe { result.as_bytes_mut() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
-        if result.error != 0 { return None; }
-        Some(LfPointer(result.value as u32))
+        if result.error != 0 { Err(FlipperError::Malloc)?; }
+        Ok(LfPointer(result.value as u32))
     }
 
     /// Frees a buffer of memory in Flipper's memory space.
-    fn free(&mut self, pointer: LfPointer) -> Option<()> {
+    fn free(&mut self, pointer: LfPointer) -> Result<()> {
 
         // Create a free packet
         let mut packet = FmrPacket::new(FmrClass::free);
@@ -206,14 +222,16 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() });
+        self.read(unsafe { result.as_bytes_mut() })
+            .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
-        if result.error != 0 { return None; }
-        Some(())
+        if result.error != 0 { Err(FlipperError::Free)?; }
+        Ok(())
     }
 }
 
@@ -252,13 +270,13 @@ impl Modules {
 /// Any type which implement `Into<Arg>` can be appended to an `Args` list.
 /// This currently includes `u8`, `u16`, `u32`, and `u64`.
 ///
-/// ```
-/// use flipper::lf::Arg;
+/// ```rust-norun
+/// use flipper::Arg;
 ///
-/// let one =   Arg::from(10 as u8);
-/// let two =   Arg::from(20 as u16);
+/// let one   = Arg::from(10 as u8);
+/// let two   = Arg::from(20 as u16);
 /// let three = Arg::from(30 as u32);
-/// let four =  Arg::from(40 as u64);
+/// let four  = Arg::from(40 as u64);
 /// ```
 pub struct Arg(pub(crate) LfArg);
 
@@ -307,15 +325,19 @@ impl From<LfPointer> for Arg {
     }
 }
 
-/// Represents an ordered, typed set of arguments to a Flipper remote call. This is
-/// to be used for calling `invoke`.
+/// Represents an ordered, typed set of arguments to a Flipper remote call. This
+/// is to be used for calling `LfClient::invoke`.
+///
+/// # Example
 ///
 /// ```
-/// let args = Args::new()
-///                .append(10 as u8)
-///                .append(20 as u16)
-///                .append(30 as u32)
-///                .append(40 as u64);
+/// use flipper::Args;
+///
+/// let mut args = Args::new();
+/// args.append(10 as u8)
+///     .append(20 as u16)
+///     .append(30 as u32)
+///     .append(40 as u64);
 /// ```
 pub struct Args(Vec<Arg>);
 
@@ -410,13 +432,13 @@ impl From<LfReturn> for LfPointer {
     }
 }
 
-pub fn create_call(
+fn create_call(
     packet: &mut FmrPacket,
     module: LfModule,
     function: LfFunction,
     return_type: LfType,
     args: &[LfArg],
-) -> Result<(), ()> {
+) -> Option<()> {
     let argc = args.len() as LfArgc;
 
     let mut offset = unsafe {
@@ -432,7 +454,7 @@ pub fn create_call(
 
     // Copy each argument into the call packet
     for i in 0..argc {
-        let arg: &LfArg = args.get(i as usize).ok_or(())?;
+        let arg = args.get(i as usize)?;
         unsafe {
             packet.body.call.argt |= (((arg.kind as u8) & LfType::MAX) as u32) << (i * 4);
 
@@ -447,11 +469,11 @@ pub fn create_call(
         }
     }
 
-    Ok(())
+    Some(())
 }
 
 /// Given a memory buffer and a length, generates a CRC of the data in the buffer.
-pub fn calculate_crc(data: *const u8, length: u32) -> u16 {
+fn calculate_crc(data: *const u8, length: u32) -> u16 {
     const POLY: u16 = 0x1021;
     let mut crc: u16 = 0;
     for i in 0..length {
@@ -484,10 +506,9 @@ mod tests {
         ];
 
         let mut packet = FmrPacket::new(FmrClass::call);
-        let mut call_packet = unsafe { packet.into_call() };
-        create_call(&mut call_packet, 3, 5, LfType::lf_void, &args);
+        create_call(&mut packet, 3, 5, LfType::lf_void, &args).unwrap();
 
-        let payload = unsafe { packet.base.payload };
+        let payload = unsafe { packet.body.base.0 };
         for chunk in payload.chunks(8) {
             for byte in chunk {
                 print!("{:02X} ", byte);

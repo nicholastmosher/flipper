@@ -14,7 +14,7 @@
 ///
 /// Below is an example demonstrating how one would generate the implementation for the LED module.
 ///
-/// ```
+/// ```rust-norun
 /// flipper_module! (Led, led,
 ///     0, fn configure() -> (),
 ///     1, fn rgb(red: u8, green: u8, blue: u8) -> (),
@@ -23,7 +23,7 @@
 ///
 /// This macro would generate the following code:
 ///
-/// ```
+/// ```rust-norun
 /// pub mod led {
 ///     use flipper::{lf, Flipper};
 ///     pub struct Led<'a> {
@@ -51,7 +51,7 @@
 ///
 /// A consumer of the generated module could then use it like this:
 ///
-/// ```
+/// ```rust-norun
 /// use flipper::Flipper;
 /// use led::Led;
 ///

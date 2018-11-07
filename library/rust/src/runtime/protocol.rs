@@ -9,7 +9,7 @@ pub const FMR_PAYLOAD_SIZE: usize = FMR_PACKET_SIZE - size_of::<FmrHeader>();
 
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
-pub struct FmrPayload([u8; FMR_PAYLOAD_SIZE]);
+pub struct FmrPayload(pub [u8; FMR_PAYLOAD_SIZE]);
 const FMR_PAYLOAD_EMPTY: FmrPayload = FmrPayload([0; FMR_PAYLOAD_SIZE]);
 
 pub type LfCrc = u16;

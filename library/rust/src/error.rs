@@ -1,32 +1,32 @@
-// TODO implement error driver
-enum _Error {
+use std::io;
+use std::result;
+use failure::Error;
+
+pub type Result<T> = result::Result<T, Error>;
+
+#[derive(Debug, Fail)]
+pub enum FlipperError {
+
+    #[fail(display = "encountered an io error: {}", inner)]
+    Io {
+        inner: io::Error,
+    },
+
+    #[fail(display = "invocation error")]
+    Invoke,
+
+    #[fail(display = "module loading error")]
+    Load,
+
+    #[fail(display = "push error")]
+    Push,
+
+    #[fail(display = "pull error")]
+    Pull,
+
+    #[fail(display = "malloc error")]
     Malloc,
-    Null,
-    Overflow,
-    NoDevice,
-    NotAttached,
-    AlreadyAttached,
-    FsExists,
-    FsNoFile,
-    FmrOverflow,
-    Fmr,
-    Endpoint,
-    LibUsb,
-    Communication,
-    Socket,
-    Module,
-    Resolution,
-    String,
-    Checksum,
-    Name,
-    Configuration,
-    Ack,
-    Type,
-    Boundary,
-    Timer,
-    Timeout,
-    NoPID,
-    invalidTask,
-    Subclass,
-    Unimplemented,
+
+    #[fail(display = "free error")]
+    Free,
 }

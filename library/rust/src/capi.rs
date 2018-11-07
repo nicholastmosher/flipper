@@ -5,7 +5,7 @@ use std::os::raw::{c_void, c_char};
 
 use crate::runtime::{Client, Args};
 use crate::runtime::protocol::*;
-use crate::carbon::{Carbon, Carbons};
+use crate::device::carbon::{Carbon, Carbons};
 
 #[repr(u32)]
 pub enum LfResult {
@@ -31,10 +31,10 @@ pub enum LfResult {
 /// `lf_release_usb(devices)`.
 #[no_mangle]
 pub extern "C" fn lf_attach_usb(devices: *mut *mut c_void, length: *mut u32) -> LfResult {
-    let carbons = Carbon::attach();
+    let carbons = Carbon::attach_usb();
     if carbons.len() == 0 { return LfResult::lf_no_devices_found; }
 
-    let carbons = Box::new(Carbon::attach());
+    let carbons = Box::new(Carbon::attach_usb());
     let carbons_length = carbons.len();
     let carbons_pointer = Box::into_raw(carbons);
 
@@ -92,7 +92,7 @@ pub extern "C" fn lf_select(devices: *mut c_void, index: u32) -> *mut c_void {
 /// Here's an example of building an argument list using `lf_create_args` and
 /// `lf_append_arg`:
 ///
-/// ```
+/// ```c
 /// void *argv = NULL;
 /// LfResult result = lf_create_args(&argv);
 ///
@@ -111,7 +111,7 @@ pub extern "C" fn lf_select(devices: *mut c_void, index: u32) -> *mut c_void {
 #[no_mangle]
 pub extern "C" fn lf_create_args(argv: *mut *mut c_void) -> LfResult {
     // Create a vector with enough capacity for all of the arguments
-    let mut args: Args = Args::new();
+    let args: Args = Args::new();
 
     // Box the vector and return the raw heap pointer to the caller
     let ptr = Box::into_raw(Box::new(args));
@@ -126,7 +126,7 @@ pub extern "C" fn lf_create_args(argv: *mut *mut c_void) -> LfResult {
 /// should be initialized using its native type initialization, then cast into
 /// a `LfValue` when passed to this function.
 ///
-/// ```
+/// ```c
 /// void *argv;
 /// lf_create_args(&argv);
 ///
@@ -184,7 +184,7 @@ pub extern "C" fn lf_append_arg(argv: *mut c_void, value: LfValue, kind: LfType)
 ///
 /// In order to invoke `led_rgb(10, 20, 30)` in C, we would do the following:
 ///
-/// ```
+/// ```c
 /// // Get the list of Flipper: Carbon USB devices
 /// void *usb_devices;
 /// uint32_t length;
@@ -247,7 +247,7 @@ pub extern "C" fn lf_invoke(
 
     // Perform the invocation and
     match device.invoke(module_string, function, return_type, &args) {
-        Some(ret) => unsafe {
+        Ok(ret) => unsafe {
             match return_type {
                 LfType::lf_uint8 => *(return_value as *mut u8) = ret as u8,
                 LfType::lf_uint16 => *(return_value as *mut u16) = ret as u16,
@@ -260,7 +260,7 @@ pub extern "C" fn lf_invoke(
                 _ => (),
             }
         }
-        None => return LfResult::lf_invocation_error,
+        _ => return LfResult::lf_invocation_error,
     }
 
     // We only borrowed these structs, so we should not drop the boxes when this function ends

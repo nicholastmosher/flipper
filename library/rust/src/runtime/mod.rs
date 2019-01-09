@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::collections::HashMap;
 use std::os::raw::c_char;
 
-pub trait LfDevice: Read + Write {
+pub trait Client: Read + Write {
     fn modules(&mut self) -> &mut Modules;
 
     fn invoke(
@@ -21,25 +21,24 @@ pub trait LfDevice: Read + Write {
     ) -> Option<u64> {
 
         // Create a call packet
-        let packet = FmrPacket::new(FmrClass::call);
-        let mut call_packet = FmrPacketCall::from(packet);
+        let mut packet = FmrPacket::new(FmrClass::call);
 
         // Write the module index and function arguments into the packet
         let module = self.load(module).expect("should get module");
         let argv: Vec<_> = args.iter().map(|arg| arg.0).collect();
-        create_call(&mut call_packet, module as u32, function, ret, &argv);
+        create_call(&mut packet, module as u32, function, ret, &argv);
 
         // Calculate the crc for the packet
-        let len = call_packet.header.len as u32;
-        let crc = calculate_crc(&call_packet as *const _ as *const u8, len);
-        call_packet.header.crc = crc;
+        let len = packet.header.len as u32;
+        let crc = calculate_crc(&packet as *const _ as *const u8, len);
+        packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { call_packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() });
 
         // Receive the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_mut_bytes() });
+        self.read(unsafe { result.as_bytes_mut() });
 
         Some(result.value)
     }
@@ -51,8 +50,7 @@ pub trait LfDevice: Read + Write {
         if let Some(module) = modules.find(module) { return Some(module as u64); }
 
         // Create a dyld packet
-        let packet = FmrPacket::new(FmrClass::dyld);
-        let mut dyld_packet = FmrPacketDyld::from(packet);
+        let mut packet = FmrPacket::new(FmrClass::dyld);
 
         let module_cstring = match CString::new(module) {
             Ok(cstr) => cstr,
@@ -61,21 +59,21 @@ pub trait LfDevice: Read + Write {
 
         // Copy the module name into the packet
         let buffer = module_cstring.as_bytes_with_nul();
-        let module_cstr = unsafe { &mut (dyld_packet.module) as *mut *mut c_char as *mut u8 };
+        let module_cstr = unsafe { &mut (packet.body.dyld.module) as *mut *mut c_char as *mut u8 };
         unsafe { ptr::copy(buffer.as_ptr(), module_cstr, buffer.len()) };
-        dyld_packet.header.len += buffer.len() as u16;
+        packet.header.len += buffer.len() as u16;
 
         // Calculate the crc for the packet
-        let len = dyld_packet.header.len as u32;
-        let crc = calculate_crc(&dyld_packet as *const _ as *const u8, len);
-        dyld_packet.header.crc = crc;
+        let len = packet.header.len as u32;
+        let crc = calculate_crc(&packet as *const _ as *const u8, len);
+        packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { dyld_packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() });
 
         // Receive the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_mut_bytes() });
+        self.read(unsafe { result.as_bytes_mut() });
 
         if result.error != 0 { return None; }
 
@@ -99,27 +97,28 @@ pub trait LfDevice: Read + Write {
     fn push(&mut self, pointer: LfPointer, data: &[u8]) -> Option<()> {
 
         // Create a push packet
-        let packet = FmrPacket::new(FmrClass::push);
-        let mut push_packet = FmrPacketPushPull::from(packet);
+        let mut packet = FmrPacket::new(FmrClass::push);
 
         // Write the length and address of the target memory buffer into the packet
-        push_packet.len = data.len() as u32;
-        push_packet.ptr = pointer.0 as u64;
+        unsafe {
+            packet.body.data.len = data.len() as u32;
+            packet.body.data.ptr = pointer.0 as u64;
+        }
 
         // Calculate the crc for the packet
-        let len = push_packet.header.len as u32;
-        let crc = calculate_crc(&push_packet as *const _ as *const u8, len);
-        push_packet.header.crc = crc;
+        let len = packet.header.len as u32;
+        let crc = calculate_crc(&packet as *const _ as *const u8, len);
+        packet.header.crc = crc;
 
         // Write the packet as raw bytes
-        self.write(unsafe { push_packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() });
 
         // Write the push payload as raw bytes
         self.write(data);
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_mut_bytes() });
+        self.read(unsafe { result.as_bytes_mut() });
 
         if result.error != 0 { return None; }
         Some(())
@@ -136,27 +135,28 @@ pub trait LfDevice: Read + Write {
     fn pull(&mut self, pointer: LfPointer, buffer: &mut [u8]) -> Option<()> {
 
         // Create a pull packet
-        let packet = FmrPacket::new(FmrClass::pull);
-        let mut pull_packet = FmrPacketPushPull::from(packet);
+        let mut packet = FmrPacket::new(FmrClass::pull);
 
         // Write the length and address of the target memory buffer into the packet
-        pull_packet.len = buffer.len() as u32;
-        pull_packet.ptr = pointer.0 as u64;
+        unsafe {
+            packet.body.data.len = buffer.len() as u32;
+            packet.body.data.ptr = pointer.0 as u64;
+        }
 
         // Calculate the crc for the packet
-        let len = pull_packet.header.len as u32;
-        let crc = calculate_crc(&pull_packet as *const _ as *const u8, len);
-        pull_packet.header.crc = crc;
+        let len = packet.header.len as u32;
+        let crc = calculate_crc(&packet as *const _ as *const u8, len);
+        packet.header.crc = crc;
 
         // Write the packet as raw bytes
-        self.write(unsafe { pull_packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() });
 
         // Read the pull payload as raw bytes
         self.read(buffer);
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_mut_bytes() });
+        self.read(unsafe { result.as_bytes_mut() });
 
         if result.error != 0 { return None; }
         Some(())
@@ -166,23 +166,24 @@ pub trait LfDevice: Read + Write {
     fn malloc(&mut self, size: u32) -> Option<LfPointer> {
 
         // Create a malloc packet
-        let packet = FmrPacket::new(FmrClass::malloc);
-        let mut malloc_packet = FmrPacketMemory::from(packet);
+        let mut packet = FmrPacket::new(FmrClass::malloc);
 
         // Write the size of the requested buffer in the packet
-        malloc_packet.size = size;
+        unsafe {
+            packet.body.memory.size = size;
+        }
 
         // Calculate the crc for the packet
-        let len = malloc_packet.header.len as u32;
-        let crc = calculate_crc(&malloc_packet as *const _ as *const u8, len);
-        malloc_packet.header.crc = crc;
+        let len = packet.header.len as u32;
+        let crc = calculate_crc(&packet as *const _ as *const u8, len);
+        packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { malloc_packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() });
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_mut_bytes() });
+        self.read(unsafe { result.as_bytes_mut() });
 
         if result.error != 0 { return None; }
         Some(LfPointer(result.value as u32))
@@ -192,23 +193,24 @@ pub trait LfDevice: Read + Write {
     fn free(&mut self, pointer: LfPointer) -> Option<()> {
 
         // Create a free packet
-        let packet = FmrPacket::new(FmrClass::free);
-        let mut free_packet = FmrPacketMemory::from(packet);
+        let mut packet = FmrPacket::new(FmrClass::free);
 
         // Write the address of the buffer to free into the packet
-        free_packet.ptr = pointer.0 as u64;
+        unsafe {
+            packet.body.memory.ptr = pointer.0 as u64;
+        }
 
         // Calculate the crc for the packet
-        let len = free_packet.header.len as u32;
-        let crc = calculate_crc(&free_packet as *const _ as *const u8, len);
-        free_packet.header.crc = crc;
+        let len = packet.header.len as u32;
+        let crc = calculate_crc(&packet as *const _ as *const u8, len);
+        packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { free_packet.as_bytes() });
+        self.write(unsafe { packet.as_bytes() });
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_mut_bytes() });
+        self.read(unsafe { result.as_bytes_mut() });
 
         if result.error != 0 { return None; }
         Some(())
@@ -409,7 +411,7 @@ impl From<LfReturn> for LfPointer {
 }
 
 pub fn create_call(
-    packet: &mut FmrPacketCall,
+    packet: &mut FmrPacket,
     module: LfModule,
     function: LfFunction,
     return_type: LfType,
@@ -417,23 +419,25 @@ pub fn create_call(
 ) -> Result<(), ()> {
     let argc = args.len() as LfArgc;
 
-    // Populate call packet
-    packet.call.module = module as u8;
-    packet.call.function = function;
-    packet.call.ret = return_type;
-    packet.call.argc = argc;
+    let mut offset = unsafe {
+        // Populate call packet
+        packet.body.call.module = module as u8;
+        packet.body.call.function = function;
+        packet.body.call.ret = return_type;
+        packet.body.call.argc = argc;
 
-    // Take the offset to the base of the argument list
-    let mut offset = &mut packet.call.argv as *mut () as *mut u8;
+        // Take the offset to the base of the argument list
+        &mut packet.body.call.argv as *mut () as *mut u8
+    };
 
     // Copy each argument into the call packet
     for i in 0..argc {
         let arg: &LfArg = args.get(i as usize).ok_or(())?;
-        packet.call.argt |= (((arg.kind as u8) & LfType::MAX) as u32) << (i * 4);
-
-        // Copy the argument value into the call packet
-        let arg_size = arg.kind.size();
         unsafe {
+            packet.body.call.argt |= (((arg.kind as u8) & LfType::MAX) as u32) << (i * 4);
+
+            // Copy the argument value into the call packet
+            let arg_size = arg.kind.size();
             let arg_value_address = &arg.value as *const u64;
             ptr::copy(arg_value_address as *const u8, offset, arg_size);
 

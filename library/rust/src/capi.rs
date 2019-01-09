@@ -1,13 +1,11 @@
 use std::mem;
 use std::ptr;
-use std::slice;
 use std::ffi::CStr;
 use std::os::raw::{c_void, c_char};
 
-use crate::runtime::{LfDevice, Args, create_call};
+use crate::runtime::{Client, Args};
 use crate::runtime::protocol::*;
 use crate::carbon::{Carbon, Carbons};
-use crate::device::{UsbDevice, AtsamDevice};
 
 #[repr(u32)]
 pub enum LfResult {
@@ -81,7 +79,7 @@ pub extern "C" fn lf_select_carbon(devices: *mut c_void, index: u32) -> *mut c_v
 pub extern "C" fn lf_carbon_atmegau2(carbon: *mut c_void) -> *mut c_void {
     if carbon == ptr::null_mut() { return ptr::null_mut(); }
     let carbon = unsafe { &mut *(carbon as *mut Carbon) };
-    let atmegau2 = carbon.atmegau2() as *mut LfDevice;
+    let atmegau2 = carbon.atmegau2() as *mut Client;
     let boxed_atmegau2 = Box::new(atmegau2);
     Box::into_raw(boxed_atmegau2) as *mut c_void
 }
@@ -102,7 +100,7 @@ pub extern "C" fn lf_carbon_atmegau2(carbon: *mut c_void) -> *mut c_void {
 pub extern "C" fn lf_carbon_atsam4s(carbon: *mut c_void) -> *mut c_void {
     if carbon == ptr::null_mut() { return ptr::null_mut(); }
     let carbon = unsafe { &mut *(carbon as *mut Carbon) };
-    let atsam4s = carbon.atsam4s() as *mut LfDevice;
+    let atsam4s = carbon.atsam4s() as *mut Client;
     let boxed_atsam4s = Box::new(atsam4s);
     Box::into_raw(boxed_atsam4s) as *mut c_void
 }
@@ -256,7 +254,7 @@ pub extern "C" fn lf_invoke(
     }
 
     // Reconstruct the device trait object from the raw pointer given
-    let mut device: Box<Box<dyn LfDevice>> = unsafe { Box::from_raw(device as *mut _) };
+    let mut device: Box<Box<dyn Client>> = unsafe { Box::from_raw(device as *mut _) };
 
     // Build a Rust string from the given char *.
     let module_cstr = unsafe { CStr::from_ptr(module) };

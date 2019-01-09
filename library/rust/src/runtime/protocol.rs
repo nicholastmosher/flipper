@@ -41,78 +41,50 @@ pub struct FmrHeader {
     pub magic: u8,
     pub crc: LfCrc,
     pub len: u16,
-    pub kind: FmrClass,
+    pub class: FmrClass,
 }
 
-pub union FmrPacket {
-    pub base: FmrPacketBase,
-    pub call: FmrPacketCall,
-    pub data: FmrPacketPushPull,
-    pub dyld: FmrPacketDyld,
-    pub memory: FmrPacketMemory,
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct FmrPacket {
+    pub header: FmrHeader,
+    pub body: FmrBody,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+pub union FmrBody {
+    pub base: FmrPayload,
+    pub call: FmrCall,
+    pub data: FmrPushPull,
+    pub dyld: FmrDyld,
+    pub memory: FmrMemory,
 }
 
 impl FmrPacket {
     pub fn new(class: FmrClass) -> FmrPacket {
         FmrPacket {
-            base: FmrPacketBase {
-                header: FmrHeader {
-                    magic: FMR_MAGIC_NUMBER,
-                    crc: 0,
-                    // Under normal circumstances this would be mem::size_of::<FmrHeader>(),
-                    // but for some reason the packed repr in C calculates the size as 8, not 6.
-                    len: 8,
-                    kind: class,
-                },
-                payload: FMR_PAYLOAD_EMPTY,
+            header: FmrHeader {
+                magic: FMR_MAGIC_NUMBER,
+                crc: 0,
+                // Under normal circumstances this would be mem::size_of::<FmrHeader>(),
+                // but for some reason the packed repr in C calculates the size as 8, not 6.
+                len: 8,
+                class,
+            },
+            body: FmrBody {
+                base: FMR_PAYLOAD_EMPTY,
             }
         }
     }
-}
 
-pub trait FmrAsBytes: Sized {
-    unsafe fn as_bytes(&self) -> &[u8] {
-        slice::from_raw_parts(self as *const _ as *const u8, size_of::<FmrPacket>())
+    pub unsafe fn as_bytes(&self) -> &[u8] {
+        slice::from_raw_parts(self as *const _ as *const u8, size_of::<Self>())
     }
-}
 
-impl From<FmrPacket> for FmrPacketCall {
-    fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut _ as *mut FmrPacketCall) }
+    pub unsafe fn as_bytes_mut(&mut self) -> &mut [u8] {
+        slice::from_raw_parts_mut(self as *mut _ as *mut u8, size_of::<Self>())
     }
-}
-
-impl FmrAsBytes for FmrPacketCall { }
-
-impl From<FmrPacket> for FmrPacketPushPull {
-    fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut _ as *mut FmrPacketPushPull) }
-    }
-}
-
-impl FmrAsBytes for FmrPacketPushPull { }
-
-impl From<FmrPacket> for FmrPacketDyld {
-    fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut _ as *mut FmrPacketDyld) }
-    }
-}
-
-impl FmrAsBytes for FmrPacketDyld { }
-
-impl From<FmrPacket> for FmrPacketMemory {
-    fn from(mut packet: FmrPacket) -> Self {
-        unsafe { *(&mut packet as *mut _ as *mut FmrPacketMemory) }
-    }
-}
-
-impl FmrAsBytes for FmrPacketMemory { }
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPacketBase {
-    pub header: FmrHeader,
-    pub payload: FmrPayload,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -128,30 +100,20 @@ pub struct FmrCall {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-pub struct FmrPacketCall {
-    pub header: FmrHeader,
-    pub call: FmrCall,
-}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-pub struct FmrPacketPushPull {
-    pub header: FmrHeader,
+pub struct FmrPushPull {
     pub len: u32,
     pub ptr: u64,
 }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-pub struct FmrPacketDyld {
-    pub header: FmrHeader,
+pub struct FmrDyld {
     pub module: *mut c_char,
 }
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
-pub struct FmrPacketMemory {
-    pub header: FmrHeader,
+pub struct FmrMemory {
     pub size: u32,
     pub ptr: u64,
 }
@@ -166,7 +128,11 @@ pub struct FmrReturn {
 impl FmrReturn {
     pub fn new() -> FmrReturn { FmrReturn { value: 0, error: 0 } }
 
-    pub unsafe fn as_mut_bytes(&mut self) -> &mut [u8] {
+    pub unsafe fn as_bytes(&self) -> &[u8] {
+        slice::from_raw_parts(self as *const _ as *const u8, size_of::<FmrReturn>())
+    }
+
+    pub unsafe fn as_bytes_mut(&mut self) -> &mut [u8] {
         slice::from_raw_parts_mut(self as *mut _ as *mut u8, size_of::<FmrReturn>())
     }
 }
@@ -232,12 +198,24 @@ impl LfType {
     }
 }
 
+fn write_bytes<W: fmt::Write>(writer: &mut W, bytes: &[u8]) -> fmt::Result {
+    for chunk in bytes.chunks(8) {
+        for byte in chunk { write!(writer, "{:02X} ", byte)?; }
+        writeln!(writer)?;
+    }
+    Ok(())
+}
+
+impl Debug for FmrBody {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let data = unsafe { & *(self as *const FmrBody as *const _ as *const u8) };
+        let bytes = unsafe { slice::from_raw_parts(data, size_of::<FmrBody>()) };
+        write_bytes(f, bytes)
+    }
+}
+
 impl Debug for FmrPayload {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for chunk in self.0.chunks(8) {
-            for byte in chunk { write!(f, "{:02X} ", byte)?; }
-            writeln!(f);
-        }
-        Ok(())
+        write_bytes(f, &self.0)
     }
 }

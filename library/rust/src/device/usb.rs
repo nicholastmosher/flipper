@@ -1,7 +1,7 @@
 use std::io::{self as io, Read, Write};
 use std::time::Duration;
 use crate::runtime::{
-    LfDevice,
+    Client,
     Modules,
 };
 
@@ -39,7 +39,7 @@ impl<'a> Write for UsbDevice<'a> {
     }
 }
 
-impl<'a> LfDevice for UsbDevice<'a> {
+impl<'a> Client for UsbDevice<'a> {
     fn modules(&mut self) -> &mut Modules {
         &mut self.modules
     }

@@ -20,7 +20,7 @@ pub mod runtime;
 pub mod device;
 pub mod carbon;
 
-pub use self::runtime::LfDevice;
+pub use self::runtime::Client;
 pub use self::runtime::protocol::LfType;
 
 use libc::{c_void, c_char};

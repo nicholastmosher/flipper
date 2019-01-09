@@ -1,25 +1,25 @@
 use flipper_core::{
-    LfDevice,
+    Client,
     LfType,
     runtime::Args,
     carbon::Carbon,
 };
 
-struct Led<'a, T: LfDevice> {
+struct Led<'a, T: Client> {
     device: &'a mut T,
 }
 
-impl<'a, T: LfDevice> Led<'a, T> {
+impl<'a, T: Client> Led<'a, T> {
     pub fn new(device: &'a mut T) -> Led<'a, T> {
         Led { device }
     }
 
     pub fn rgb(&mut self, red: u8, green: u8, blue: u8) {
-        let args = Args::new()
-            .append(red)
+        let mut args = Args::new();
+        args.append(red)
             .append(green)
             .append(blue);
-        self.device.invoke("led", 0, LfType::lf_void, args);
+        self.device.invoke("led", 0, LfType::lf_void, &args);
     }
 }
 
@@ -28,5 +28,5 @@ fn main() {
     let carbon = carbons.iter_mut().next().expect("should get a Flipper on usb");
 
     let mut led = Led::new(carbon.atmegau2());
-    led.rgb(10, 00, 10);
+    led.rgb(10, 05, 10);
 }

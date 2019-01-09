@@ -1,5 +1,5 @@
 use std::io::{Read, Write, Result};
-use crate::runtime::{LfDevice, Args};
+use crate::runtime::{Client, Args};
 use crate::runtime::protocol::LfType;
 
 pub enum UartBaud {
@@ -16,11 +16,11 @@ impl UartBaud {
     }
 }
 
-pub struct Uart0<'a, T: LfDevice> {
+pub struct Uart0<'a, T: Client> {
     device: &'a mut T,
 }
 
-impl<'a, T: LfDevice> Uart0<'a, T> {
+impl<'a, T: Client> Uart0<'a, T> {
     pub fn new(device: &'a mut T) -> Self {
         Uart0 { device }
     }
@@ -42,7 +42,7 @@ impl<'a, T: LfDevice> Uart0<'a, T> {
     }
 }
 
-impl<'a, T: LfDevice> Write for Uart0<'a, T> {
+impl<'a, T: Client> Write for Uart0<'a, T> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         let device_buffer = self.device.malloc(buf.len() as u32).expect("should malloc");
         self.device.push(device_buffer, buf);
@@ -58,7 +58,7 @@ impl<'a, T: LfDevice> Write for Uart0<'a, T> {
     }
 }
 
-impl<'a, T: LfDevice> Read for Uart0<'a, T> {
+impl<'a, T: Client> Read for Uart0<'a, T> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() == 0 { return Ok(0) }
         let device_buffer = self.device.malloc(buf.len() as u32).expect("should malloc");

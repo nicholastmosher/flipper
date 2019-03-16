@@ -15,35 +15,30 @@
 /// Below is an example demonstrating how one would generate the implementation for the LED module.
 ///
 /// ```rust-norun
-/// flipper_module! (Led, led,
-///     0, fn configure() -> (),
-///     1, fn rgb(red: u8, green: u8, blue: u8) -> (),
-/// );
+/// flipper_module! (led::Led: [
+///     0 => fn led_configure() -> LfType::lf_void,
+///     1 => fn led_rgb(red: u8, green: u8, blue: u8) -> LfType::lf_void,
+/// ]);
 /// ```
 ///
 /// This macro would generate the following code:
 ///
 /// ```rust-norun
 /// pub mod led {
-///     use flipper::{lf, Flipper};
-///     pub struct Led<'a> {
-///         flipper: &'a Flipper,
-///     }
+///     use flipper::{Flipper, Client, Args, LfType, Result};
 ///
-///     impl<'a> Led<'a> {
-///         pub fn new(flipper: &'a Flipper) -> Led<'a> { Led { flipper } }
-///
-///         pub fn configure(&self) -> () {
-///             let args = lf::Args::new();
-///             lf::invoke(&self.flipper, "led", 0, args)
+///     pub trait Led: Client {
+///         fn led_configure() -> Result<u64> {
+///             let mut args = Args::new();
+///             self.invoke("led", 0, LfType::lf_void, &args)
 ///         }
 ///
-///         pub fn rgb(&self, red: u8, green: u8, blue: u8) -> () {
-///             let args = lf::Args::new();
-///             let args = args.append(red);
-///             let args = args.append(green);
-///             let args = args.append(blue);
-///             lf::invoke(&self.flipper, "led", 1, args)
+///         fn led_rgb(red: u8, green: u8, blue: u8) -> Result<u64> {
+///             let mut args = Args::new();
+///             let mut args = args.append(red);
+///             let mut args = args.append(blue);
+///             let mut args = args.append(green);
+///             self.invoke("led", 1, LfType::lf_void, &args)
 ///         }
 ///     }
 /// }
@@ -55,33 +50,28 @@
 /// use flipper::Flipper;
 /// use led::Led;
 ///
-/// let flipper = Flipper::attach().unwrap();
-/// let led = Led::new(&flipper);
-/// led.configure();
-/// led.rgb(10, 10, 0);
+/// let flipper: Flipper = unimplemented!();
+/// flipper.led_configure();
+/// flipper.led_rgb(10, 10, 0);
 /// ```
 #[macro_export]
 macro_rules! flipper_module (
-    ($name:ident, $ns:ident,
+    ($ns:ident :: $name:ident: [
         $(
-            $idx:expr, fn $func:ident ( $($args:tt)* ) -> $ret:ty
-        ),*$(,)*
+            $idx:expr => fn $func:ident ( $($args:tt)* ) -> $lfret:expr
+        ),*$(,)* ]
     ) => {
         pub mod $ns {
-            use $crate::{lf, Flipper};
-            pub struct $name<'a> {
-                flipper: &'a Flipper,
-            }
-
-            impl<'a> $name<'a> {
-                pub fn new(flipper: &'a Flipper) -> $name<'a> { $name { flipper } }
-
+            use $crate::{Flipper, Client, Args, LfType, Result};
+            pub trait $name: Client {
                 $(
-                    pub fn $func (&self, $($args)*) -> $ret {
-                        __flipper_module_func_impl!(self, stringify!($ns), $idx, $($args)*)
+                    fn $func (&mut self, $($args)*) -> Result<u64> {
+                        __flipper_module_func_impl!(self, stringify!($ns), $idx, $lfret, $($args)*)
                     }
                 )*
             }
+
+            impl<T> $name for T where T: Client { }
         }
     }
 );
@@ -89,11 +79,11 @@ macro_rules! flipper_module (
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __flipper_module_func_impl (
-    ($self_:ident, $key:expr, $idx:expr, $($name:ident: $typ:ty),*$(,)*) => {{
-        let args = lf::Args::new();
+    ($self_:ident, $key:expr, $idx:expr, $lfret:expr, $($name:ident: $typ:ty),*$(,)*) => {{
+        let mut args = Args::new();
         $(
-            let args = args.append($name);
+            let mut args = args.append($name);
         )*
-        lf::invoke(&$self_.flipper, $key, $idx, args)
+        $self_.invoke($key, $idx, $lfret, &args)
     }}
 );

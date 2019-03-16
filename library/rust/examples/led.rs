@@ -1,23 +1,19 @@
-use flipper::{Client, LfType, Args, Flipper};
+#[macro_use]
+extern crate flipper;
+
 use libusb::Context;
+use flipper::Flipper;
 
-trait Led: Client {
-    fn led_rgb(&mut self, red: u8, green: u8, blue: u8) {
-        let mut args = Args::new();
-        args.append(red)
-            .append(green)
-            .append(blue);
-        self.invoke("led", 0, LfType::lf_void, &args);
-    }
-}
-
-impl<T> Led for T where T: Client { }
+flipper_module!(led::Led: [
+    0 => fn led_rgb(red: u8, green: u8, blue: u8) -> LfType::lf_void,
+]);
 
 fn main() {
-    let mut context = Context::new().expect("should get usb context");
+    use led::Led;
 
+    let mut context = Context::new().expect("should get usb context");
     let mut flippers = Flipper::attach_usb(&mut context);
     let flipper = flippers.first_mut().expect("should find one flipper");
 
-    flipper.led_rgb(10, 05, 10);
+    let _ = flipper.led_rgb(10, 05, 10);
 }

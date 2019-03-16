@@ -14,8 +14,10 @@ use crate::error::{
     FlipperError,
 };
 
-pub trait Client: Read + Write {
+pub trait Client {
     fn modules(&mut self) -> &mut Modules;
+    fn reader(&mut self) -> &mut Read;
+    fn writer(&mut self) -> &mut Write;
 
     fn invoke(
         &mut self,
@@ -40,12 +42,12 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() })
+        self.writer().write(unsafe { packet.as_bytes() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Receive the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() })
+        self.reader().read(unsafe { result.as_bytes_mut() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         Ok(result.value)
@@ -75,12 +77,12 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() })
+        self.writer().write(unsafe { packet.as_bytes() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Receive the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() })
+        self.reader().read(unsafe { result.as_bytes_mut() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         if result.error != 0 { Err(FlipperError::Load)?; }
@@ -119,16 +121,16 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Write the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() })
+        self.writer().write(unsafe { packet.as_bytes() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Write the push payload as raw bytes
-        self.write(data)
+        self.writer().write(data)
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() })
+        self.reader().read(unsafe { result.as_bytes_mut() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         if result.error != 0 { Err(FlipperError::Push)?; }
@@ -160,16 +162,16 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Write the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() })
+        self.writer().write(unsafe { packet.as_bytes() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the pull payload as raw bytes
-        self.read(buffer)
+        self.reader().read(buffer)
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() })
+        self.reader().read(unsafe { result.as_bytes_mut() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         if result.error != 0 { Err(FlipperError::Pull)?; }
@@ -193,12 +195,12 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() })
+        self.writer().write(unsafe { packet.as_bytes() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() })
+        self.reader().read(unsafe { result.as_bytes_mut() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         if result.error != 0 { Err(FlipperError::Malloc)?; }
@@ -222,12 +224,12 @@ pub trait Client: Read + Write {
         packet.header.crc = crc;
 
         // Send the packet as raw bytes
-        self.write(unsafe { packet.as_bytes() })
+        self.writer().write(unsafe { packet.as_bytes() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         // Read the result as raw bytes
         let mut result = FmrReturn::new();
-        self.read(unsafe { result.as_bytes_mut() })
+        self.reader().read(unsafe { result.as_bytes_mut() })
             .map_err(|ioe| FlipperError::Io { inner: ioe })?;
 
         if result.error != 0 { Err(FlipperError::Free)?; }
@@ -238,6 +240,7 @@ pub trait Client: Read + Write {
 pub struct Module {
     name: String,
     index: u32,
+    #[allow(dead_code)]
     version: u16,
 }
 

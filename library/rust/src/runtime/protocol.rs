@@ -78,10 +78,12 @@ impl FmrPacket {
         }
     }
 
+    #[allow(dead_code)]
     pub unsafe fn as_bytes(&self) -> &[u8] {
         slice::from_raw_parts(self as *const _ as *const u8, size_of::<Self>())
     }
 
+    #[allow(dead_code)]
     pub unsafe fn as_bytes_mut(&mut self) -> &mut [u8] {
         slice::from_raw_parts_mut(self as *mut _ as *mut u8, size_of::<Self>())
     }
@@ -128,9 +130,9 @@ pub struct FmrReturn {
 impl FmrReturn {
     pub fn new() -> FmrReturn { FmrReturn { value: 0, error: 0 } }
 
-    pub unsafe fn as_bytes(&self) -> &[u8] {
-        slice::from_raw_parts(self as *const _ as *const u8, size_of::<FmrReturn>())
-    }
+//    pub unsafe fn as_bytes(&self) -> &[u8] {
+//        slice::from_raw_parts(self as *const _ as *const u8, size_of::<FmrReturn>())
+//    }
 
     pub unsafe fn as_bytes_mut(&mut self) -> &mut [u8] {
         slice::from_raw_parts_mut(self as *mut _ as *mut u8, size_of::<FmrReturn>())

@@ -7,13 +7,16 @@ use crate::runtime::{
 
 use libusb::{
     self,
-    Context, Device, DeviceDescriptor, DeviceHandle
+    Context,
+    Device,
+    DeviceDescriptor,
+    DeviceHandle,
 };
 
 const FLIPPER_USB_VENDOR_ID: u16 = 0x16C0;
 
 #[allow(unused)]
-pub struct UsbDevice<'a> {
+pub struct UsbClient<'a> {
     device: Device<'a>,
     handle: DeviceHandle<'a>,
     descriptor: DeviceDescriptor,
@@ -22,14 +25,14 @@ pub struct UsbDevice<'a> {
     modules: Modules,
 }
 
-impl<'a> Read for UsbDevice<'a> {
+impl<'a> Read for UsbClient<'a> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         self.handle.read_bulk(self.read_endpoint.address, buf, Duration::from_secs(1))
             .map_err(|_| io::ErrorKind::Other.into())
     }
 }
 
-impl<'a> Write for UsbDevice<'a> {
+impl<'a> Write for UsbClient<'a> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
         self.handle.write_bulk(self.write_endpoint.address, buf, Duration::from_secs(1))
             .map_err(|_| io::ErrorKind::Other.into())
@@ -40,13 +43,15 @@ impl<'a> Write for UsbDevice<'a> {
     }
 }
 
-impl<'a> Client for UsbDevice<'a> {
-    fn modules(&mut self) -> &mut Modules {
-        &mut self.modules
-    }
+impl<'a> Client for UsbClient<'a> {
+    fn modules(&mut self) -> &mut Modules { &mut self.modules }
+
+    fn reader(&mut self) -> &mut Read { self }
+
+    fn writer(&mut self) -> &mut Write { self }
 }
 
-pub fn get_usb_devices(context: &mut Context) -> Vec<UsbDevice> {
+pub fn get_usb_devices(context: &mut Context) -> Vec<UsbClient> {
     let devices = context.devices().expect("should get usb devices");
 
     let mut usb_devices = vec![];
@@ -85,7 +90,7 @@ pub fn get_usb_devices(context: &mut Context) -> Vec<UsbDevice> {
             _ => continue,
         };
 
-        usb_devices.push(UsbDevice {
+        usb_devices.push(UsbClient {
             device,
             descriptor,
             handle,
@@ -146,7 +151,6 @@ mod tests {
     #[test]
     fn test_list_devices() {
         let mut context = Context::new().expect("should get libusb context");
-        let devices = get_usb_devices(&mut context);
-        println!("HEllo");
+        let _devices = get_usb_devices(&mut context);
     }
 }

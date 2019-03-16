@@ -1,9 +1,5 @@
-use flipper::{
-    Client,
-    LfType,
-    Args,
-    Carbon,
-};
+use flipper::{Client, LfType, Args, Flipper};
+use libusb::Context;
 
 struct Led<'a, T: Client> {
     device: &'a mut T,
@@ -24,9 +20,10 @@ impl<'a, T: Client> Led<'a, T> {
 }
 
 fn main() {
-    let mut carbons = Carbon::attach_usb();
-    let carbon = carbons.iter_mut().next().expect("should get a Flipper on usb");
+    let mut context = Context::new().expect("should get usb context");
+    let mut flippers = Flipper::attach_usb(&mut context);
+    let flipper = flippers.first_mut().expect("should find one flipper");
 
-    let mut led = Led::new(carbon);
+    let mut led = Led::new(flipper);
     led.rgb(10, 05, 10);
 }

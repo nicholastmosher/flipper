@@ -1,14 +1,11 @@
 use std::io::{self as io, Read, Write};
-use std::slice::{Iter, IterMut};
-use libusb::Context;
 
 use crate::{Client, LfType, Args};
 use crate::runtime::Modules;
 use crate::error::Result;
 use crate::device::{
-    AtsamDevice,
-    UsbDevice,
-    get_usb_devices,
+    AtsamClient,
+    UsbClient,
 };
 
 lazy_static! {
@@ -17,87 +14,35 @@ lazy_static! {
     ];
 }
 
-pub struct Carbons<'a> {
-    context: Box<Context>,
-    // Wrap the devices vec in an Option in order to control the drop order.
-    // `devices` must be dropped before the context.
-    devices: Option<Vec<Carbon<'a>>>,
-}
-
-impl<'a> Carbons<'a> {
-    pub fn len(&self) -> usize {
-        self.devices.as_ref().unwrap().len()
-    }
-
-    pub fn get(&self, index: usize) -> Option<&Carbon<'a>> {
-        self.devices.as_ref().unwrap().get(index)
-    }
-
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut Carbon<'a>> {
-        self.devices.as_mut().unwrap().get_mut(index)
-    }
-
-    pub fn iter(&self) -> Iter<Carbon<'a>> {
-        self.devices.as_ref().unwrap().iter()
-    }
-
-    pub fn iter_mut(&mut self) -> IterMut<Carbon<'a>> {
-        self.devices.as_mut().unwrap().iter_mut()
-    }
-}
-
-impl<'a> Drop for Carbons<'a> {
-    fn drop(&mut self) {
-        // Drop the devices vec before dropping the libusb context.
-        self.devices = None
-    }
-}
-
 pub struct Carbon<'a> {
     modules: Modules,
-    atmegau2: Box<UsbDevice<'a>>,
-    atsam4s: Option<AtsamDevice<'a, UsbDevice<'a>>>,
+    atmegau2: UsbClient<'a>,
+    atsam4s: Option<AtsamClient<'a, UsbClient<'a>>>,
 }
 
 impl<'a> Carbon<'a> {
-    pub fn attach_usb() -> Carbons<'a> {
-        let context = Context::new().expect("should get libusb context");
-        let mut carbons = Carbons { context: Box::new(context), devices: Some(vec![]) };
-
-        // Erase the lifetime of the context. We never allow a Carbon device to be moved
-        // out of the Carbons struct so we can guarantee that they live exactly as long
-        // as the libusb Context.
-        let context = unsafe { &mut *(carbons.context.as_mut() as *mut _) };
-
-        for atmegau2 in get_usb_devices(context) {
-            carbons.devices.as_mut().unwrap().push(Carbon::new(atmegau2))
-        }
-
-        carbons
-    }
-
-    fn new(atmegau2: UsbDevice<'a>) -> Carbon<'a> {
+    pub fn new(atmegau2: UsbClient<'a>) -> Carbon<'a> {
         let mut carbon = Carbon {
             modules: Modules::new(),
-            atmegau2: Box::new(atmegau2),
-            atsam4s: None
+            atsam4s: None,
+            atmegau2,
         };
 
         // Erase the lifetime of the UsbDevice. Since AtsamDevice requires a reference
         // to the UsbDevice, placing them both in the same struct creates a self-referential
         // problem. However, since neither the UsbDevice nor the AtsamDevice can be individually
         // moved out of this struct, they will both be dropped at the same time.
-        let atmegau2 = unsafe { &mut *(carbon.atmegau2.as_mut() as *mut _) };
-        let atsam4s = AtsamDevice::new(atmegau2);
+        let atmegau2 = unsafe { &mut *(&mut carbon.atmegau2 as *mut _) };
+        let atsam4s = AtsamClient::new(atmegau2);
         carbon.atsam4s = Some(atsam4s);
         carbon
     }
 
-    fn atmegau2(&mut self) -> &mut UsbDevice<'a> {
+    fn atmegau2(&mut self) -> &mut UsbClient<'a> {
         &mut self.atmegau2
     }
 
-    fn atsam4s(&mut self) -> &mut AtsamDevice<'a, UsbDevice<'a>> {
+    fn atsam4s(&mut self) -> &mut AtsamClient<'a, UsbClient<'a>> {
         self.atsam4s.as_mut().unwrap()
     }
 }
@@ -122,6 +67,15 @@ impl<'a> Client for Carbon<'a> {
     fn modules(&mut self) -> &mut Modules {
         &mut self.modules
     }
+
+    fn reader(&mut self) -> &mut Read {
+        self.atsam4s().reader()
+    }
+
+    fn writer(&mut self) -> &mut Write {
+        self.atsam4s().writer()
+    }
+
     fn invoke(&mut self, module: &str, function: u8, ret: LfType, args: &Args) -> Result<u64> {
         let client: &mut Client = if ATMEGA_MODULES.contains(&module) {
             self.atmegau2()

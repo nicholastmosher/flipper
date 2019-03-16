@@ -3,7 +3,7 @@
 #![deny(unstable_features)]
 #![deny(unused_import_braces)]
 #![deny(unused_qualifications)]
-//#![deny(warnings)]
+#![deny(warnings)]
 
 #[allow(unused_imports)]
 #[macro_use]
@@ -26,7 +26,7 @@ mod error;
 pub use self::runtime::Args;
 pub use self::runtime::Client;
 pub use self::runtime::protocol::LfType;
-pub use self::device::Carbon;
+pub use self::device::Flipper;
 
 pub use self::error::Result;
 pub use failure::Error;

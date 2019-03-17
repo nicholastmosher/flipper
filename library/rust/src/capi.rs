@@ -56,12 +56,6 @@ enum FFIContainer<'a> {
     ArgsList(Args),
 }
 
-impl<'a> From<Args> for FFIContainer<'a> {
-    fn from(args: Args) -> Self {
-        FFIContainer::ArgsList(args)
-    }
-}
-
 /// Returns an opaque pointer to a list of Flipper devices and the length of
 /// the list.
 ///
@@ -108,7 +102,7 @@ pub extern "C" fn lf_select(devices: *mut c_void, index: u32, device: *mut *mut 
 
     match *ffi_devices_container {
         FFIContainer::UsbDevices(ref mut devices) => {
-            let client: Option<&mut Client>  = unsafe {
+            let client: Option<&mut Client> = unsafe {
                 let mut_ref = Pin::get_unchecked_mut(devices.as_mut());
                 mut_ref.usb_flippers
                     .get_mut(index as usize)
@@ -130,66 +124,26 @@ pub extern "C" fn lf_select(devices: *mut c_void, index: u32, device: *mut *mut 
     LfResult::lf_success
 }
 
-/// Creates an empty argument list to be used with `lf_invoke`.
+/// Adds a new argument (value and type) to an argument list.
 ///
-/// This function creates an opaque, heap-allocated struct used for preparing a
-/// remote function call to Flipper. The typical usage is to create the argument
-/// list, then to append each argument to it using `lf_append_arg`, then to pass
-/// it to `lf_invoke` to perform the invocation.
-///
-/// Since the list is heap-allocated, it is the responsibility of the caller to
-/// free the memory when the list is no longer needed. The proper way to do this
-/// is by using `lf_release`.
-///
-/// # Example
-///
-/// Here's an example of building an argument list using `lf_create_args` and
-/// `lf_append_arg`:
+/// The argument list is represented by an opaque pointer. A new argument
+/// list can be created by passing a reference to a NULL pointer as the
+/// `argv` argument. Then, the value and type parameters will be appended to
+/// the new list, or to the existing list.
 ///
 /// ```c
 /// void *argv = NULL;
-/// LfResult result = lf_create_args(&argv);
+/// lf_append_arg(&argv, (LfValue) 0x20000000, lf_uint32);
+/// lf_append_arg(&argv, (LfValue) 0x40000000, lf_uint32);
+/// lf_append_arg(&argv, (LfValue) 0x80000000, lf_uint32);
 ///
-/// // Result will be nonzero if there is an error.
-/// if (result) {
-///     printf("There was an error creating an argument list!\n");
-///     return 1;
-/// }
-///
-/// // Add a uint8_t of value 10 as the first argument. See `lf_append_arg`.
-/// lf_append_arg(argv, (LfValue) 10, lf_uint8);
-///
-/// // Release the argument list when you're done with it.
+/// // Make sure to release the list when you're done
 /// lf_release(argv);
 /// ```
-#[no_mangle]
-pub extern "C" fn lf_create_args(argv: *mut *mut c_void) -> LfResult {
-    // Create a vector with enough capacity for all of the arguments
-    let args: Args = Args::new();
-
-    // Box the vector and return the raw heap pointer to the caller
-    let ffi_container = Box::new(FFIContainer::from(args));
-    let ffi_pointer = Box::into_raw(ffi_container) as *mut c_void;
-    unsafe { *argv = ffi_pointer };
-
-    LfResult::lf_success
-}
-
-/// Appends a new argument (value and type) onto an existing argument list.
 ///
 /// If the argument being appended is smaller than 8 bytes, then its value
 /// should be initialized using its native type initialization, then cast into
 /// a `LfValue` when passed to this function.
-///
-/// ```c
-/// void *argv;
-/// lf_create_args(&argv);
-///
-/// uint32_t argument1 = 0x40000000;
-/// LfType arg1kind = lf_uint32;
-///
-/// lf_append_arg(argv, (LfValue) argument1, arg1kind);
-/// ```
 ///
 /// As new items are appended to the list, the list will automatically re-alloc
 /// itself and grow as necessary.
@@ -198,11 +152,21 @@ pub extern "C" fn lf_create_args(argv: *mut *mut c_void) -> LfResult {
 /// enum), then nothing will be appended to the list, and an `LfResult` of
 /// `lf_illegal_type` will be returned.
 #[no_mangle]
-pub extern "C" fn lf_append_arg(argv: *mut c_void, value: LfValue, kind: LfType) -> LfResult {
+pub extern "C" fn lf_append_arg(argv: *mut *mut c_void, value: LfValue, kind: LfType) -> LfResult {
     if argv == ptr::null_mut() { return LfResult::lf_null_pointer; }
 
+    // If the argv handle is null, create a new, empty args list and assign it
+    unsafe {
+        if *argv == ptr::null_mut() {
+            let args = Args::new();
+            let ffi_container = Box::new(FFIContainer::ArgsList(args));
+            let ffi_pointer = Box::into_raw(ffi_container) as *mut c_void;
+            *argv = ffi_pointer
+        }
+    }
+
     // Reconstruct the args vector from the argv handle
-    let mut ffi: Box<FFIContainer> = unsafe { Box::from_raw(argv as *mut _) };
+    let mut ffi: Box<FFIContainer> = unsafe { Box::from_raw(*argv as *mut _) };
 
     match &mut *ffi {
         FFIContainer::ArgsList(ref mut args) => {
@@ -293,8 +257,6 @@ pub extern "C" fn lf_invoke(
     }
 
     // Reconstruct the device trait object from the raw pointer given
-//    let device: Box<&mut dyn Client> = unsafe { Box::from_raw(device as *mut _) };
-
     let mut ffi_device_container: Box<FFIContainer> = unsafe { Box::from_raw(device as *mut _) };
     let device = match *ffi_device_container {
         FFIContainer::Flipper(ref mut client) => client,

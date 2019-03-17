@@ -11,7 +11,7 @@ use crate::runtime::{
 };
 
 lazy_static! {
-    static ref ATMEGA_MODULES: Vec<&'static str> = vec![
+    static ref ATMEGA_MODULES: &'static [&'static str] = &[
         "led",
     ];
 }
